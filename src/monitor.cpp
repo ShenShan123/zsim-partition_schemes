@@ -66,6 +66,7 @@ uint32_t UMonMonitor::getNumAccesses(uint32_t partition) const {
     return monitor->getNumAccesses();
 }
 
+
 uint32_t UMonMonitor::get(uint32_t partition, uint32_t bucket) const {
     assert(partition < monitors.size());
 
@@ -132,4 +133,34 @@ void UMonMonitor::reset() {
         monitor->startNextInterval();
     }
     missCacheValid = false;
+}
+
+ReuseDistMonitor::ReuseDistMonitor(uint32_t _numPartitions, uint32_t _bankSets, uint32_t _samplerSets, uint32_t _intLength, uint32_t _window) : 
+    PartitionMonitor(0), monitors(_numPartitions, nullptr) 
+{
+    assert(_numPartitions > 0);
+
+    for (auto& monitor : monitors)
+        monitor = new ReuseDistSampler(_bankSets, _samplerSets, _intLength, _window);
+}
+
+ReuseDistMonitor::~ReuseDistMonitor() {
+    for (auto monitor : monitors) {
+        delete monitor;
+    }
+
+    monitors.clear();
+}
+
+void ReuseDistMonitor::access(uint32_t partition, Address lineAddr) {
+    //info("start monitor access, part %d, lineaddr %lx, monitor addr %p", partition, lineAddr, (void*)monitors[partition]);
+    assert(partition < monitors.size());
+    //info("monitor size %d", (int)monitors.size());
+    monitors[partition]->access(lineAddr);
+    //info("return from monitor access, part %d, lineaddr %lx, monitor addr %p", partition, lineAddr, (void*)monitors[partition]);
+}
+
+void ReuseDistMonitor::reset() {
+    for (auto monitor : monitors)
+        monitor->clear();
 }

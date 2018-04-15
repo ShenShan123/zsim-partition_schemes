@@ -169,4 +169,6 @@ void LookaheadPartitioner::partition() {
 
     repl->setPartitionSizes(curAllocs);
     repl->getMonitor()->reset();
+    auto rdMonitor = repl->getRdMonitor();
+    if (rdMonitor != nullptr) rdMonitor->reset();
 }

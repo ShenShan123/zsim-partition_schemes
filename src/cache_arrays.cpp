@@ -105,10 +105,13 @@ int32_t ZArray::lookup(const Address lineAddr, const MemReq* req, bool updateRep
     if (unlikely(!lineAddr)) panic("ZArray::lookup called with lineAddr==0 -- your app just segfaulted");
 
     for (uint32_t w = 0; w < ways; w++) {
-        uint32_t lineId = lookupArray[w*numSets + (hf->hash(w, lineAddr) & setMask)];
+        uint32_t set = hf->hash(w, lineAddr) & setMask;
+        uint32_t lineId = lookupArray[w*numSets + set];
         if (array[lineId] == lineAddr) {
             if (updateReplacement) {
-                rp->update(lineId, req);
+                //rp->update(lineId, req);
+
+                rp->hitUpdate(lineId, req);
             }
             return lineId;
         }

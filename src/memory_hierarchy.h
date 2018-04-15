@@ -77,6 +77,7 @@ inline bool IsPut(AccessType t) { return t == PUTS || t == PUTX; }
 /* Memory request */
 struct MemReq {
     Address lineAddr;
+    // specify the set that the line maps to, save the time of hash calculation, by shen
     AccessType type;
     uint32_t childId;
     MESIState* state;

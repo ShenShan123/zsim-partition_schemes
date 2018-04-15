@@ -206,13 +206,24 @@ BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, 
 
         PartitionMonitor* mon = new UMonMonitor(numLines, umonLines, umonWays, pm->getNumPartitions(), buckets);
 
+        // reuse distance sampler! by shen
+        PartitionMonitor* rdMon = nullptr;
+        string monitor = config.get<const char*>(prefix + "repl.monitor", "rdMonitor");
+
+        if (monitor == "rdMonitor") {
+            uint32_t samplerSets = config.get<uint32_t>(prefix + "repl.samplerSets", 256);
+            uint32_t maxRd = config.get<uint32_t>(prefix + "repl.maxRd", 1024);
+            uint32_t window = config.get<uint32_t>(prefix + "repl.window", 0);
+            rdMon = new ReuseDistMonitor(pm->getNumPartitions(), numSets, samplerSets, maxRd, window);
+        }
+
         //Finally, instantiate the repl policy
         PartReplPolicy* prp;
         double allocPortion = 1.0;
         if (replType == "WayPart") {
             //if set, drives partitioner but doesn't actually do partitioning
             bool testMode = config.get<bool>(prefix + "repl.testMode", false);
-            prp = new WayPartReplPolicy(mon, pm, numLines, ways, testMode);
+            prp = new WayPartReplPolicy(mon, pm, numLines, ways, testMode, rdMon);
         } else if (replType == "IdealLRUPart") {
             prp = new IdealLRUPartReplPolicy(mon, pm, numLines, buckets);
         } else if (replType == "Vantage") {

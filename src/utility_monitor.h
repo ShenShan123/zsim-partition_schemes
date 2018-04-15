@@ -29,6 +29,9 @@
 #include "galloc.h"
 #include "memory_hierarchy.h"
 #include "stats.h"
+// add by shen
+#include "mtrand.h"
+#include "g_std/g_unordered_map.h"
 
 //Print some information regarding utility monitors and partitioning
 #define UMON_INFO 1
@@ -75,6 +78,98 @@ class UMon : public GlobAlloc {
         void startNextInterval();
 
         uint32_t getBuckets() const { return buckets; }
+};
+
+/* for recording distribution into a Histogram, 
+   Accur is the accuracy of transforming calculation */
+template <class B = uint32_t>
+class Histogram : public GlobAlloc
+{
+    protected:
+        B * bins;
+        B samples;
+        int size;
+
+    public:
+        Histogram() : bins(nullptr), samples(0), size(0) {};
+    
+        Histogram(int s);
+    
+        Histogram(const Histogram<B> & rhs);
+    
+        ~Histogram();
+    
+        void setSize(int s);
+    
+        const int getSize();
+    
+        void clear();
+    
+        void normalize();
+    
+        B & operator[] (const int idx) const;
+    
+        Histogram<B> & operator=(const Histogram<B> & rhs);
+    
+        Histogram<B> & operator+=(const Histogram<B> & rhs);
+    
+        inline void sample(int x, uint16_t n = 1);
+    
+        const B getSamples() const; 
+    
+        //void print(std::ofstream & file);
+        void print();
+};
+
+/* calculate log2(s) + 1 */
+template<class T>
+inline T log2p1(T s)
+{
+    T result = 0;
+    while (s) {
+        s >>= 1;
+        ++result;
+    }
+
+    return result;
+}
+
+/* fast to calculate log2(x)+1 */
+#ifdef LOG2
+#define DOLOG(x) log2p1(x)
+#else
+#define DOLOG(x) x
+#endif
+
+/* do reuse distance statistics */
+class ReuseDistSampler : public GlobAlloc 
+{
+    private:
+        g_unordered_map<uint64_t, uint32_t> addrMap;
+        uint32_t* indices;
+        uint32_t intervalLength; // must be 2^n
+        uint32_t sampleWindow;
+        uint32_t* sampleCntrs;
+        uint32_t* residuals;
+        uint32_t maxRd;
+        uint32_t dssRate; // we sample one set every "dssRate" sets, must be 2^n
+        uint32_t samplerSets;
+        MTRand rng;
+        Histogram<uint32_t> rdv;
+        //Used in masks for set indices and sampling factor descisions
+        HashFamily* hf; // we calculate the RD for each set, so the hash function using in cache array is needed
+    public:
+        ReuseDistSampler(uint32_t _bankSets, uint32_t _samplerSets, uint32_t _intLength, uint32_t _window = 0);
+    
+        ~ReuseDistSampler();
+    
+        uint32_t cleanOldEntry();
+    
+        //uint32_t mapMaxSize() { return maxsize; }
+    
+        void access(uint64_t addr);
+    
+        void clear();
 };
 
 #endif  // UTILITY_MONITOR_H_

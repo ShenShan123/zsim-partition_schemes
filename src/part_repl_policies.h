@@ -49,14 +49,17 @@ class PartReplPolicy : public virtual ReplPolicy {
     protected:
         PartitionMonitor* monitor;
         PartMapper* mapper;
+        PartitionMonitor* rdMonitor;
 
     public:
-        PartReplPolicy(PartitionMonitor* _monitor, PartMapper* _mapper) : monitor(_monitor), mapper(_mapper) {}
-        ~PartReplPolicy() { delete monitor; }
+        PartReplPolicy(PartitionMonitor* _monitor, PartMapper* _mapper, PartitionMonitor* _rdMonitor = nullptr) : monitor(_monitor), mapper(_mapper), rdMonitor(_rdMonitor) {}
+        ~PartReplPolicy() { delete monitor; delete rdMonitor; }
 
         virtual void setPartitionSizes(const uint32_t* sizes) = 0;
 
         PartitionMonitor* getMonitor() { return monitor; }
+        // return the RD monitor, by shen
+        PartitionMonitor* getRdMonitor() { return rdMonitor; }
         const PartitionMonitor* getMonitor() const { return monitor; }
 };
 
@@ -93,8 +96,8 @@ class WayPartReplPolicy : public PartReplPolicy, public LegacyReplPolicy {
         uint64_t timestamp;
 
     public:
-        WayPartReplPolicy(PartitionMonitor* _monitor, PartMapper* _mapper, uint64_t _lines, uint32_t _ways, bool _testMode)
-                : PartReplPolicy(_monitor, _mapper), totalSize(_lines), ways(_ways), testMode(_testMode)
+        WayPartReplPolicy(PartitionMonitor* _monitor, PartMapper* _mapper, uint64_t _lines, uint32_t _ways, bool _testMode, PartitionMonitor* _rdMonitor)
+                : PartReplPolicy(_monitor, _mapper, _rdMonitor), totalSize(_lines), ways(_ways), testMode(_testMode)
         {
             partitions = mapper->getNumPartitions();
             waySize = totalSize/ways; // start with evenly sized partitions
@@ -124,7 +127,7 @@ class WayPartReplPolicy : public PartReplPolicy, public LegacyReplPolicy {
 
             candIdx = 0;
             bestId = -1;
-            timestamp = 1;
+            timestamp = 1;            
         }
 
         void initStats(AggregateStat* parentStat) {
@@ -170,6 +173,7 @@ class WayPartReplPolicy : public PartReplPolicy, public LegacyReplPolicy {
 
             //Update partitioner...
             monitor->access(e->p, e->addr);
+            rdMonitor->access(e->p, e->addr);
         }
 
         void hitUpdate(uint32_t id, const MemReq* req) { update(id, req); } //sxj
