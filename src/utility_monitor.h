@@ -154,6 +154,7 @@ class ReuseDistSampler : public GlobAlloc
         uint32_t maxRd;
         uint32_t dssRate; // we sample one set every "dssRate" sets, must be 2^n
         uint32_t samplerSets;
+        uint32_t bankSets;
         MTRand rng;
         Histogram<uint32_t> rdv;
         //Used in masks for set indices and sampling factor descisions

@@ -256,7 +256,7 @@ void Histogram<B>::print()
 // ==================== ReuseDistSampler class ====================
 ReuseDistSampler::ReuseDistSampler(uint32_t _bankSets, uint32_t _samplerSets, uint32_t _intLength, uint32_t _window) : 
     indices(nullptr), intervalLength(_intLength), sampleWindow(_window), sampleCntrs(nullptr), residuals(nullptr), maxRd(_intLength - 1), 
-    dssRate(_bankSets / _samplerSets), samplerSets(_samplerSets), rdv(_intLength)
+    dssRate(_bankSets / _samplerSets), samplerSets(_samplerSets), bankSets(_bankSets), rdv(_intLength)
 {
     assert(_bankSets >= _samplerSets);
     assert(intervalLength);
@@ -313,10 +313,13 @@ uint32_t ReuseDistSampler::cleanOldEntry()
 void ReuseDistSampler::access(uint64_t addr)
 {
     // do we sample this line? if not, just return
-    if ( (hf->hash(0, addr)) & (dssRate - 1) )
+    //if ( (hf->hash(0, addr)) & (dssRate - 1) )
+    uint32_t set = hf->hash(0, addr) & (bankSets - 1);
+    if (set & (dssRate - 1))
         return;
 
-    uint32_t ss = (hf->hash(1, addr)) & (samplerSets - 1); // ss is the sampler set index
+    //uint32_t ss = (hf->hash(1, addr)) & (samplerSets - 1); 
+    uint32_t ss = set / dssRate; // ss is the sampler set index
     assert(ss < samplerSets);
 
     uint32_t & index = ++indices[ss];
