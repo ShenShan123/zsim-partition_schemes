@@ -153,12 +153,8 @@ BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, 
             rp = new LRUReplPolicy<false>(numLines);
         }
     } else if (replType == "RRIP") { // sxj RRIP接口
-        bool sharersAware = (replType == "RRIP") && !isTerminal;
-        if (sharersAware) {
-            rp = new RRIPReplPolicy<true>(numLines);
-        } else {
-            rp = new RRIPReplPolicy<false>(numLines);
-        }
+        const uint32_t distRRPV = config.get<uint32_t>(prefix + "repl.distantRRPV", 15);
+        rp = new RRIPReplPolicy<false>(numLines, distRRPV);
     } else if (replType == "LFU") {
         rp = new LFUReplPolicy(numLines);
     } else if (replType == "LRUProfViol") {

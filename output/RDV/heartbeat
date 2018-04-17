@@ -1,0 +1,9 @@
+Running on: ubuntu
+Start time: Tue Apr 17 06:44:12 2018
+Heartbeat time: Tue Apr 17 06:54:22 2018
+Stats since start:
+ 708272 phases
+ 7082710000 cycles
+ 11611000 cycles/s
+Stats since last heartbeat (10s):
+ 11661000 cycles/s

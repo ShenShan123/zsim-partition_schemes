@@ -150,24 +150,28 @@ class LRUReplPolicy : public ReplPolicy {
 
 //RRIP 
 template <bool sharersAware>
-class RRIPReplPolicy : public ReplPolicy {
+class SRRIPReplPolicy : public ReplPolicy {
     protected:
-        uint64_t* array; // 用于RRPV的存储
+        uint8_t* array; // 用于RRPV的存储
         uint32_t numLines; //line的数量
+        uint8_t distantRRPV; // for SRRIP, the best is M=4bits, so the "long re-reference interval" is RRPV = 14
 
     public:
-        explicit RRIPReplPolicy(uint32_t _numLines) : numLines(_numLines) {
-            array = gm_calloc<uint64_t>(numLines);
+        explicit SRRIPReplPolicy(uint32_t _numLines, const uint32_t _dist) : numLines(_numLines), distantRRPV(_dist) {
+            array = gm_calloc<uint8_t>(numLines);
+
             for (uint32_t i = 0; i <= numLines; i++)
-                array[i] = 3; // 一开始对所有的line的RRPV初始化为3
+                array[i] = distantRRPV; // 一开始对所有的line的RRPV初始化为distant RRPV
+
+            info("init SRRIP replacement policy, distant prediction is %d", distantRRPV);
         }
 
-        ~RRIPReplPolicy() {
+        ~SRRIPReplPolicy() {
             gm_free(array);
         }
 
         void update(uint32_t id, const MemReq* req) {
-            array[id] = 2;
+            array[id] = distantRRPV - 1;
         }
 
         //this function only works differently from update() in RRIP repl policy, sxj
@@ -176,26 +180,29 @@ class RRIPReplPolicy : public ReplPolicy {
         }
 
         void replaced(uint32_t id) {
-            array[id] = 3 ;
+            array[id] = distantRRPV - 1; // if the line has been replaced, its RRPV is long
         }
 
         template <typename C> inline uint32_t rank(const MemReq* req, C cands) {
-            uint32_t bestCand = -1;
-            uint64_t bestScore = (uint64_t)-1L;
-            bool haveA3 = 0; // 用于判断是否找到了没有sharer的RRPV为3的line
-            for (auto ci = cands.begin(); ci != cands.end(); ci.inc()) {
-                uint32_t s = score(*ci);
-                bestCand = (s < bestScore)? *ci : bestCand;
-                bestScore = MIN(s, bestScore);
-                if (!bestScore) {
-                    haveA3 = 1;
-                    break;
+            uint32_t bestCand = numLines;
+            uint8_t bestScore = (uint8_t)-1;
+            bool haveA3 = false; //the flag that successfully finds a victim
+            while (!haveA3) { // 如果最终都没有没有sharer且RRPV为distant的line，则set内的line的RRPV+1
+                for (auto ci = cands.begin(); ci != cands.end(); ci.inc()) {
+                    uint32_t s = score(*ci);
+                    bestCand = (s < bestScore)? *ci : bestCand;
+                    bestScore = MIN(s, bestScore); // lower score the better candidate
+                    if (!bestScore) { // the candidate has been found till the best score is 0
+                        haveA3 = true;
+                        break;
+                    }
                 }
-            }
-            if (!haveA3) { // 如果最终都没有没有sharer且RRPV为3的line，则所有的line的RRPV+1
-                for (uint32_t i = 0; i <= numLines; i++)
-                    if (array[i] < 3)
-                        array[i]++;
+
+                if (!haveA3) // if no candidates with RRPV = distant re-reference, increment all lines in the set
+                    for (auto ci = cands.begin(); ci != cands.end(); ci.inc()) {
+                        assert(array[*ci] < distantRRPV);
+                        ++array[*ci];
+                    }
             }
 
             return bestCand;
@@ -204,14 +211,22 @@ class RRIPReplPolicy : public ReplPolicy {
         DECL_RANK_BINDINGS;
 
     private:
-        inline uint64_t score(uint32_t id) { //higher is least evictable
+        inline uint8_t score(uint32_t id) { //higher is least evictable
             //array[id] < timestamp always, so this prioritizes by:
             // (1) valid (if not valid, it's 0)
             // (2) sharers, and
             // (3) timestamp
-            return (sharersAware? cc->numSharers(id) : 0)*4 + (3 - array[id])*cc->isValid(id); // 对于RRPV为3的line直接进行evict是RRIP的方法，但是是否要考虑其他因素？
+            //return (sharersAware? cc->numSharers(id) : 0) * distantRRPV + (distantRRPV - array[id])*cc->isValid(id); // a samll value implies a better cand
+            return (distantRRPV - array[id])*cc->isValid(id); // at some circumstances, all lines are sharers, so there is no candidates met the condition of evicting 
         }
 };
+
+/*
+class PDPReplPolicy : puablic LegacyReplPolicy {
+    uint32_t* candArray;
+    uint32_t numCands;
+    uint32_t candIdx;
+}*/
 
 
 //This is VERY inefficient, uses LRU timestamps to do something that in essence requires a few bits.
