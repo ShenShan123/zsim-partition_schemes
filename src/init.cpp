@@ -154,7 +154,7 @@ BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, 
         }
     } else if (replType == "RRIP") { // sxj RRIP接口
         const uint32_t distRRPV = config.get<uint32_t>(prefix + "repl.distantRRPV", 15);
-        rp = new RRIPReplPolicy<false>(numLines, distRRPV);
+        rp = new SRRIPReplPolicy<false>(numLines, distRRPV);
     } else if (replType == "LFU") {
         rp = new LFUReplPolicy(numLines);
     } else if (replType == "LRUProfViol") {
