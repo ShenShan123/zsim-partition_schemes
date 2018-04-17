@@ -25,7 +25,8 @@
 
 #include "utility_monitor.h"
 #include "hash.h"
-
+#include <fstream>
+using namespace std;
 #define DEBUG_UMON 0
 //#define DEBUG_UMON 1
 
@@ -251,10 +252,20 @@ void Histogram<B>::print()
 
     // just for test
     info("RDV print: [0] %d, [%d] %d, total samples: %d", bins[0], size - 1, bins[size-1], samples);
+    std::ofstream outfile("rdvout.dat", ios::app); // **sxj used for set up an output file
+    //outfile << "hit counts = " << hitCounts <<", miss counts = " << missCounts << endl; // **sxj
+    //uint32_t hitRate = hitCounts/(hitCounts+missCounts);
+    //outfile << "hit counts = " << hitCounts <<", miss counts = " << missCounts << ", hit rate = " << hitRate << endl; // **sxj
+    for (int i = 0; i < size; i++) {
+        outfile << " " << bins[i]; // **sxj 
+    }
+    outfile << endl;
+    outfile.close();
+
 }
 
 // ==================== ReuseDistSampler class ====================
-ReuseDistSampler::ReuseDistSampler(uint32_t _bankSets, uint32_t _samplerSets, uint32_t _intLength, uint32_t _window) : 
+ReuseDistSampler::ReuseDistSampler(uint32_t _bankSets, uint32_t _samplerSets, uint32_t _intLength, uint32_t _window) : hitCounts(0), missCounts(0), // **sxj
     indices(nullptr), intervalLength(_intLength), sampleWindow(_window), sampleCntrs(nullptr), residuals(nullptr), maxRd(_intLength - 1), 
     dssRate(_bankSets / _samplerSets), samplerSets(_samplerSets), bankSets(_bankSets), rdv(_intLength)
 {
@@ -336,7 +347,7 @@ void ReuseDistSampler::access(uint64_t addr)
     auto pos = addrMap.find(addr);
 
     if (pos != addrMap.end()) {
-
+        hitCounts++; // **sxj
         uint32_t rd = index - pos->second - 1; 
         //info("rd = %d", rd);
         // for the sampling scheme, rd-counter is clear when finish rd calculation
@@ -351,6 +362,8 @@ void ReuseDistSampler::access(uint64_t addr)
         else
             rdv.sample(DOLOG(rd));
     }
+    else
+        missCounts++; // **sxj
 
     // for sampline scheme 
     if (sampleWindow && sampleCntrs[ss]) {
@@ -374,11 +387,22 @@ void ReuseDistSampler::access(uint64_t addr)
     }
 }
 
+void ReuseDistSampler::print() { // **sxj
+    std::ofstream outfile("rdvout.dat", ios::app); // **sxj 用于建立输出文件
+    double hitRate = 100*((double)hitCounts)/((double)(hitCounts+missCounts)); // **sxj change to the double for percentage
+    outfile << "hit counts = " << hitCounts <<", miss counts = " << missCounts << ", hit rate = " << hitRate << endl; // **sxj
+    outfile.close(); // **sxj
+}
+
 void ReuseDistSampler::clear() {
     info("addrMap size: %d", (int)addrMap.size());
     addrMap.clear(); 
+    print(); // **sxj try to call another func
     rdv.print();
     rdv.clear();
+    hitCounts = 0; // **sxj
+    missCounts = 0; // **sxj
+
 
     for (uint32_t i = 0; i < samplerSets; ++i) {
         indices[i] = 0;

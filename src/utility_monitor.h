@@ -146,6 +146,8 @@ class ReuseDistSampler : public GlobAlloc
 {
     private:
         g_unordered_map<uint64_t, uint32_t> addrMap;
+        uint32_t hitCounts; // **sxj hit counts
+        uint32_t missCounts; // **sxj miss counts
         uint32_t* indices;
         uint32_t intervalLength; // must be 2^n
         uint32_t sampleWindow;
@@ -170,6 +172,8 @@ class ReuseDistSampler : public GlobAlloc
     
         void access(uint64_t addr);
     
+        void print();
+
         void clear();
 };
 

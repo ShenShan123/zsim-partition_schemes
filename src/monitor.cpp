@@ -24,7 +24,8 @@
  */
 
 #include "partitioner.h"
-
+#include <fstream>
+using namespace std;
 // UMon
 
 UMonMonitor::UMonMonitor(uint32_t _numLines, uint32_t _umonLines, uint32_t _umonBuckets, uint32_t _numPartitions, uint32_t _buckets)
@@ -161,6 +162,15 @@ void ReuseDistMonitor::access(uint32_t partition, Address lineAddr) {
 }
 
 void ReuseDistMonitor::reset() {
-    for (auto monitor : monitors)
+    int partitionNum = 0; // **sxj
+    //std::ofstream outfile("rdvout.dat", ios::app); // **sxj 用于建立输出文件
+    //outfile << "partition " << partitionNum + 1 << ":" << endl;
+    //outfile.close();
+    for (auto monitor : monitors){
+	std::ofstream outfile("rdvout.dat", ios::app); // **sxj 用于建立输出文件
+	outfile << "partition " << partitionNum + 1 << ":" << endl;
+        outfile.close();
         monitor->clear();
+        partitionNum++; // **sxj
+    }
 }
