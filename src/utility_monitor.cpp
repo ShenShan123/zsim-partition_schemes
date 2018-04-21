@@ -142,7 +142,7 @@ void UMon::startNextInterval() {
     }
 }
 
-// ==================== Histogram class ====================
+// ==================== Histogram class ====================, by shen
 
 template <class B>
 Histogram<B>::Histogram(int _s) : samples(0), size(_s)
@@ -231,16 +231,17 @@ Histogram<B> & Histogram<B>::operator+=(const Histogram<B> & rhs)
     return *this;
 }
 
+/*
 template <class B>
 void Histogram<B>::sample(int x, uint16_t n)
 {
-    /* the sample number must less than max size of bins */
+    // the sample number must less than max size of bins
     assert(x < size && x >= 0);
     bins[x] += n;
-    /* calculate the total num of sampling */
+    // calculate the total num of sampling
     samples += n;
 }
-
+*/
 template <class B>
 void Histogram<B>::print()
 //void Histogram<B>::print(std::ofstream & file)
@@ -264,13 +265,24 @@ void Histogram<B>::print()
 
 }
 
-// ==================== ReuseDistSampler class ====================
-ReuseDistSampler::ReuseDistSampler(uint32_t _bankSets, uint32_t _samplerSets, uint32_t _intLength, uint32_t _window) : hitCounts(0), missCounts(0), // **sxj
-    indices(nullptr), intervalLength(_intLength), sampleWindow(_window), sampleCntrs(nullptr), residuals(nullptr), maxRd(_intLength - 1), 
-    dssRate(_bankSets / _samplerSets), samplerSets(_samplerSets), bankSets(_bankSets), rdv(_intLength)
+/*
+template <class B>
+B Histogram<B>::getValue(int i) const {
+    assert(x < size && x >= 0);
+    return bins[i];
+}
+*/
+
+// ==================== ReuseDistSampler class ====================, implemented by shen
+ReuseDistSampler::ReuseDistSampler(HashFamily* _hf, uint32_t _bankSets, uint32_t _samplerSets, uint32_t _buckets, uint32_t _max, uint32_t _window) 
+    : hitCounts(0), missCounts(0), // **sxj
+    indices(nullptr), intervalLength(_max), sampleWindow(_window), step((_max + 1) / _buckets), sampleCntrs(nullptr), residuals(nullptr), maxRd(_max),
+    dssRate(_bankSets / _samplerSets), samplerSets(_samplerSets), bankSets(_bankSets), hf(_hf)
 {
     assert(_bankSets >= _samplerSets);
     assert(intervalLength);
+    // the maxRd + 1 should be multiple of RDV size, so that the rdv can be filled up by all RDs
+    assert((maxRd + 1) % _buckets == 0);
 
     indices = gm_calloc<uint32_t>(samplerSets); // for the index counters
     if (_window) {
@@ -278,9 +290,11 @@ ReuseDistSampler::ReuseDistSampler(uint32_t _bankSets, uint32_t _samplerSets, ui
         residuals = gm_calloc<uint32_t>(samplerSets); // for the index counters
     }
 
-    hf = new H3HashFamily(2, 32, 0xF000BAAD);
+    //hf = new H3HashFamily(2, 32, 0xF000BAAD);
+    rdv = new Histogram<uint32_t>(_buckets);
+    rdvSize = rdv->getSize();
 
-    info("ReuseDistSampler, sampling rate %d, number of sampler %d, interval length %d, sampling window size %d", dssRate, samplerSets, _intLength, _window);
+    info("ReuseDistSampler, sampling rate 1/%d, number of sampler sets %d, max RD %d, RDV buckets: %d, sampling window size %d", dssRate, samplerSets, _max, rdv->getSize(), _window);
 }
 
 ReuseDistSampler::~ReuseDistSampler() 
@@ -291,6 +305,7 @@ ReuseDistSampler::~ReuseDistSampler()
         gm_free(sampleCntrs);
         gm_free(residuals);
     }
+    delete rdv;
 };
 
 /*
@@ -321,15 +336,15 @@ uint32_t ReuseDistSampler::cleanOldEntry()
     return maxNum;
 }*/
 
+const uint32_t ReuseDistSampler::getSet(uint64_t addr) { return hf->hash(0, addr) & (bankSets - 1); }
+
 void ReuseDistSampler::access(uint64_t addr)
 {
+    uint32_t set = getSet(addr);
     // do we sample this line? if not, just return
-    //if ( (hf->hash(0, addr)) & (dssRate - 1) )
-    uint32_t set = hf->hash(0, addr) & (bankSets - 1);
     if (set & (dssRate - 1))
         return;
 
-    //uint32_t ss = (hf->hash(1, addr)) & (samplerSets - 1); 
     uint32_t ss = set / dssRate; // ss is the sampler set index
     assert(ss < samplerSets);
 
@@ -356,11 +371,11 @@ void ReuseDistSampler::access(uint64_t addr)
         // if the rd larger than the truncation, we limite the maximum RD to maxRd
         if (rd >= maxRd) {
             //cleanOldEntry(rdv);
-            rdv.sample(DOLOG(maxRd));
+            rdv->sample(DOLOG(maxRd) / step); // the first step rds account for the increment of rdv[0], the second ones for the increment of rdv[1], and so on
         }
         // else we don't need to traverse the addrMap 
         else
-            rdv.sample(DOLOG(rd));
+            rdv->sample(DOLOG(rd) / step);
     }
     else
         missCounts++; // **sxj
@@ -395,11 +410,11 @@ void ReuseDistSampler::print() { // **sxj
 }
 
 void ReuseDistSampler::clear() {
-    info("addrMap size: %d", (int)addrMap.size());
+    info("cleaning, addrMap size: %d", (int)addrMap.size());
     addrMap.clear(); 
     print(); // **sxj try to call another func
-    rdv.print();
-    rdv.clear();
+    rdv->print();
+    rdv->clear();
     hitCounts = 0; // **sxj
     missCounts = 0; // **sxj
 

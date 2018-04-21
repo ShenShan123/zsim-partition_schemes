@@ -147,13 +147,13 @@ class MESIBottomCC : public GlobAlloc {
         uint64_t processEviction(Address wbLineAddr, uint32_t lineId, bool lowerLevelWriteback, uint64_t cycle, uint32_t srcId);
 
         uint64_t processAccess(Address lineAddr, uint32_t lineId, AccessType type, uint64_t cycle, uint32_t srcId, uint32_t flags);
-
+        uint64_t processBypass(uint64_t lineAddr, AccessType type, uint32_t childId, MESIState* state, uint64_t cycle, MESIState initialState, uint32_t srcId, uint32_t flags); // add by shen
         void processWritebackOnAccess(Address lineAddr, uint32_t lineId, AccessType type);
 
         void processInval(Address lineAddr, uint32_t lineId, InvType type, bool* reqWriteback);
 
         uint64_t processNonInclusiveWriteback(Address lineAddr, AccessType type, uint64_t cycle, MESIState* state, uint32_t srcId, uint32_t flags);
-
+        
         inline void lock() {
             futex_lock(&ccLock);
         }
@@ -305,6 +305,7 @@ class MESICC : public CC {
         //Access methods
         bool startAccess(MemReq& req) {
             assert((req.type == GETS) || (req.type == GETX) || (req.type == PUTS) || (req.type == PUTX));
+            //info("start access the parent cache");
 
             /* Child should be locked when called. We do hand-over-hand locking when going
              * down (which is why we require the lock), but not when going up, opening the
@@ -321,6 +322,8 @@ class MESICC : public CC {
              * both parent's locks. So, we first handle races, which may cause us to skip the access.
              */
             bool skipAccess = CheckForMESIRace(req.type /*may change*/, req.state, req.initialState);
+            info("start access and get the lock, skip %d", skipAccess);
+
             return skipAccess;
         }
 
@@ -361,10 +364,15 @@ class MESICC : public CC {
                 assert(!isPrefetch || req.type == GETS);
                 uint32_t flags = req.flags & ~MemReq::PREFETCH; //always clear PREFETCH, this flag cannot propagate up
 
-                //if needed, fetch line or upgrade miss from upper level
-                respCycle = bcc->processAccess(req.lineAddr, lineId, req.type, startCycle, req.srcId, flags);
+                if (lineId != (int32_t)numLines)
+                    //if needed, fetch line or upgrade miss from upper level
+                    respCycle = bcc->processAccess(req.lineAddr, lineId, req.type, startCycle, req.srcId, flags);
+                else {
+                    respCycle = bcc->processBypass(req.lineAddr, req.type, req.childId, req.state, startCycle, req.initialState, req.srcId, flags); // add by shen
+                }
+
                 if (getDoneCycle) *getDoneCycle = respCycle;
-                if (!isPrefetch) { //prefetches only touch bcc; the demand request from the core will pull the line to lower level
+                if (!isPrefetch && lineId != (int32_t)numLines) { // by shen //prefetches only touch bcc; the demand request from the core will pull the line to lower level
                     //At this point, the line is in a good state w.r.t. upper levels
                     bool lowerLevelWriteback = false;
                     //change directory info, invalidate other children if needed, tell requester about its state
@@ -380,6 +388,7 @@ class MESICC : public CC {
         }
 
         void endAccess(const MemReq& req) {
+            info("end accessing");
             //Relock child before we unlock ourselves (hand-over-hand)
             if (req.childLock) {
                 futex_lock(req.childLock);
@@ -387,6 +396,7 @@ class MESICC : public CC {
 
             bcc->unlock();
             tcc->unlock();
+            info("end accessing, unlock");
         }
 
         //Inv methods
@@ -463,9 +473,11 @@ class MESITerminalCC : public CC {
         }
 
         uint64_t processAccess(const MemReq& req, int32_t lineId, uint64_t startCycle,  uint64_t* getDoneCycle = nullptr) {
-            assert(lineId != -1);
+            assert(lineId != -1 && lineId != (int32_t)numLines); // add by shen
             assert(!getDoneCycle);
             //if needed, fetch line or upgrade miss from upper level
+            //info("Terminal CC, bcc processAccess, lineId %d", lineId);
+
             uint64_t respCycle = bcc->processAccess(req.lineAddr, lineId, req.type, startCycle, req.srcId, req.flags);
             //at this point, the line is in a good state w.r.t. upper levels
             return respCycle;

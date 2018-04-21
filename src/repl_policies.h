@@ -32,6 +32,7 @@
 #include "coherence_ctrls.h"
 #include "memory_hierarchy.h"
 #include "mtrand.h"
+#include "utility_monitor.h" // add by shen
 
 /* Generic replacement policy interface. A replacement policy is initialized by the cache (by calling setTop/BottomCC) and used by the cache array. Usage follows two models:
  * - On lookups, update() is called if the replacement policy is to be updated on a hit
@@ -221,13 +222,153 @@ class SRRIPReplPolicy : public ReplPolicy {
         }
 };
 
-/*
-class PDPReplPolicy : puablic LegacyReplPolicy {
-    uint32_t* candArray;
-    uint32_t numCands;
-    uint32_t candIdx;
-}*/
 
+// This is the PDP replacement policy, read MICRO 2012 paper for more detail, by shen
+class PDPReplPolicy : public LegacyReplPolicy {
+    protected:
+        struct LineInfo {
+            uint8_t rpd;
+            bool reuse; // the reuse bit
+        };
+
+        LineInfo* array; // store the RPDs for all lines
+        uint32_t numLines;
+        uint32_t assoc;
+        uint32_t* candArray;
+        uint32_t* distanceStep; // Sd in the paper, one counter per set
+        uint32_t numCands;
+        uint32_t candIdx;
+        ReuseDistSampler* rdSampler;
+        uint8_t pd; // the max pd is 254, must less than rdv size!!
+        int32_t bestId;
+        uint32_t maxSd; // the maximum distance step, default value is 8
+        uint32_t totAccs; // total accesses, Nt
+        bool nonInclusive;
+        uint32_t period;
+
+    public:
+        PDPReplPolicy(uint32_t _numLines, uint32_t _numSets, uint32_t _assoc, uint32_t _numCands, ReuseDistSampler* _rdSampler, uint32_t _maxSd, bool _nonInclusive) 
+        : numLines(_numLines), assoc(_assoc), numCands(_numCands), rdSampler(_rdSampler), 
+        pd((uint8_t)-1), bestId(-1), maxSd(_maxSd), totAccs(0), nonInclusive(_nonInclusive)
+        {
+            array = gm_calloc<LineInfo>(numLines);
+            for (uint32_t i = 0; i < numLines; i++) {
+                array[i].rpd = pd;
+                array[i].reuse = false;
+            }
+
+            candArray = gm_calloc<uint32_t>(numCands);
+            distanceStep = gm_calloc<uint32_t>(_numSets);
+            period = 512 * 1024;
+            info("PDP replacement policy, max PD %d, max distance %d, pd computing period %d", pd, maxSd, period);
+        }
+
+        ~PDPReplPolicy() {
+            gm_free(array);
+            gm_free(candArray);
+            gm_free(distanceStep);
+            delete rdSampler;
+        }
+
+        void update(uint32_t id, const MemReq* req) {
+            ++totAccs;
+            rdSampler->access(req->lineAddr);
+            uint32_t set = rdSampler->getSet(req->lineAddr);
+            ++distanceStep[set]; // every access, the distance step counter increase by 1
+            uint32_t first = set * assoc;
+            // if the distance step is maxSd, we decrement all RPDs of lines in this set
+            if (distanceStep[set] >= maxSd - 1) {
+                distanceStep[set] = 0;
+                for (uint32_t id = first; id < assoc + first; ++id)
+                    array[id].rpd -= array[id].rpd != 0; // decreae every access to this set, the lines' saturating counter decrease
+            }
+        }
+
+        void hitUpdate(uint32_t id, const MemReq* req) { 
+            array[id].reuse = true; 
+            array[id].rpd = pd;
+
+            update(id, req);
+        }
+        
+        void replaced(uint32_t id) {
+            array[id].rpd = pd; // when replaced, the array's RPD counter is set to pd
+            array[id].reuse = false;
+            bestId = -1;
+            candIdx = 0;
+        }
+        
+        void recordCandidate(uint32_t id) {
+            candArray[candIdx++] = id;
+        }
+
+        uint32_t getBestCandidate() {
+            uint32_t bestRpd = 0;
+            uint32_t bestInsrtRpd = 0;
+            int32_t bestProt = -1;
+            int32_t bestInsert = -1;
+            for (uint32_t i = 0; i < candIdx; ++i) {
+                LineInfo & cand = array[candArray[i]];
+                if (cand.rpd == 0) {
+                    bestId = candArray[i];
+                    break; // if we found the unprotected line, just break
+                }
+                else if (!cand.reuse && cand.rpd > bestInsrtRpd) { // there is a inserted line with no reuse
+                    bestInsert = candArray[i];
+                    bestInsrtRpd = cand.rpd;
+                }
+                else if (cand.rpd > bestRpd) { // the line with largest PD
+                    bestProt = candArray[i];
+                    bestRpd = cand.rpd;
+                }
+            }
+
+            if (bestId == -1 && nonInclusive) // if this is a non-inclusive cache, just bypoass this access
+                bestId = numLines;
+
+            bestId = bestId == -1 ? (bestInsert == -1 ? bestProt : bestInsert) : bestId;
+            assert(bestId != -1);
+            //info("best line %d, best inserted line %d, best protected line %d", bestId, bestInsert, bestProt);
+
+            // calculate the best PD every 512K access
+            if (totAccs < period)
+                return bestId;
+            // E(dp) = sum i=1->dp (Ni) / {sum i=1->dp (Ni*i) + (Nt - sum i=1->dp (Ni*i) * (dp + de))}
+            uint64_t sumN = 0;
+            uint64_t sumNi = 0;
+            double emax = 0;
+            uint8_t pdBest = 0;
+            uint32_t step = rdSampler->getStep();
+            for (uint8_t d = 1; d < (uint8_t)-1; ++d) {
+                uint32_t idx = d / step;
+                uint32_t v = rdSampler->getRdvBin(idx) / step; // one bin cotains the RD ranging in [d * step, d * step + step)
+                //info("the rdv[%d] = %d", d, v);
+                sumN += v;
+                sumNi += v * d;
+                assert((int32_t)totAccs - sumN >= 0); // the number of long RD (> maxRd) cannot be negative
+                uint64_t denominator = sumNi + (totAccs - sumN) * (d + assoc);
+                double e = (double)sumN / denominator;
+
+                if (e > emax) {
+                    emax = e;
+                    pdBest = d;
+                }
+            }
+
+            assert(pdBest);
+
+            pd = pdBest;
+            
+            totAccs = 0;
+            rdSampler->clear();
+            
+            info("best PD = %d, hit rate per way = %f", pdBest, emax);
+
+            return bestId;
+        }
+
+        DECL_RANK_BINDINGS;
+};
 
 //This is VERY inefficient, uses LRU timestamps to do something that in essence requires a few bits.
 //If you want to use this frequently, consider a reimplementation

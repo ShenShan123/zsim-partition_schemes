@@ -145,6 +145,9 @@ BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, 
     string replType = config.get<const char*>(prefix + "repl.type", (arrayType == "IdealLRUPart")? "IdealLRUPart" : "LRU");
     ReplPolicy* rp = nullptr;
 
+    // Inclusion? moved from 293 to here, by shen
+    bool nonInclusiveHack = config.get<bool>(prefix + "nonInclusiveHack", false);
+
     if (replType == "LRU" || replType == "LRUNoSh") {
         bool sharersAware = (replType == "LRU") && !isTerminal;
         if (sharersAware) {
@@ -155,6 +158,16 @@ BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, 
     } else if (replType == "RRIP") { // sxj RRIP接口
         const uint32_t distRRPV = config.get<uint32_t>(prefix + "repl.distantRRPV", 15);
         rp = new SRRIPReplPolicy<false>(numLines, distRRPV);
+    } else if (replType == "PDP") { // PDP instantiation, by shen
+        uint32_t samplerSets = config.get<uint32_t>(prefix + "repl.samplerSets", 64);
+        uint32_t buckets = config.get<uint32_t>(prefix + "repl.buckets", 64);
+        uint32_t maxRd = config.get<uint32_t>(prefix + "repl.maxRd", 255);
+        uint32_t distance = config.get<uint32_t>(prefix + "repl.distance", 8);
+        uint32_t window = config.get<uint32_t>(prefix + "repl.window", 8);
+        // PDP need reuse distance sampler
+        ReuseDistSampler* rdSampler = new ReuseDistSampler(hf, numSets, samplerSets, buckets, maxRd, window);
+        if (arrayType != "SetAssoc") panic("PDP replacement requires SetAssoc array");
+        rp = new PDPReplPolicy(numLines, numSets, ways, candidates, rdSampler, distance, nonInclusiveHack);
     } else if (replType == "LFU") {
         rp = new LFUReplPolicy(numLines);
     } else if (replType == "LRUProfViol") {
@@ -204,13 +217,14 @@ BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, 
 
         // reuse distance sampler! by shen
         PartitionMonitor* rdMon = nullptr;
-        string monitor = config.get<const char*>(prefix + "repl.monitor", "rdMonitor");
+        string monitor = config.get<const char*>(prefix + "repl.monitor", "None");
 
         if (monitor == "rdMonitor") {
             uint32_t samplerSets = config.get<uint32_t>(prefix + "repl.samplerSets", 256);
-            uint32_t maxRd = config.get<uint32_t>(prefix + "repl.maxRd", 1024);
+            uint32_t buckets = config.get<uint32_t>(prefix + "repl.buckets", 256);
+            uint32_t maxRd = config.get<uint32_t>(prefix + "repl.maxRd", 1023);
             uint32_t window = config.get<uint32_t>(prefix + "repl.window", 0);
-            rdMon = new ReuseDistMonitor(pm->getNumPartitions(), numSets, samplerSets, maxRd, window);
+            rdMon = new ReuseDistMonitor(pm->getNumPartitions(), hf, numSets, samplerSets, buckets, maxRd, window);
         }
 
         //Finally, instantiate the repl policy
@@ -276,8 +290,7 @@ BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, 
     uint32_t accLat = (isTerminal)? 0 : latency; //terminal caches has no access latency b/c it is assumed accLat is hidden by the pipeline
     uint32_t invLat = latency;
 
-    // Inclusion?
-    bool nonInclusiveHack = config.get<bool>(prefix + "nonInclusiveHack", false);
+    // non-inclusion should be configured here
     if (nonInclusiveHack) assert(type == "Simple" && !isTerminal);
 
     // Finally, build the cache

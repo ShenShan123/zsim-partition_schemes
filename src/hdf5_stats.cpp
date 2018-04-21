@@ -244,6 +244,8 @@ class HDF5BackendImpl : public GlobAlloc {
                 //Rewind
                 bufferedRecords = 0;
                 curPtr = dataBuf;
+                //startDump = true;
+                info("====== hdf5 dumping ======");
             }
         }
 };

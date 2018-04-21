@@ -42,7 +42,6 @@ uint32_t MESIBottomCC::getParentId(Address lineAddr) {
     return (res % parents.size());
 }
 
-
 void MESIBottomCC::init(const g_vector<MemObject*>& _parents, Network* network, const char* name) {
     parents.resize(_parents.size());
     parentRTTs.resize(_parents.size());
@@ -51,7 +50,6 @@ void MESIBottomCC::init(const g_vector<MemObject*>& _parents, Network* network, 
         parentRTTs[p] = (network)? network->getRTT(name, parents[p]->getName()) : 0;
     }
 }
-
 
 uint64_t MESIBottomCC::processEviction(Address wbLineAddr, uint32_t lineId, bool lowerLevelWriteback, uint64_t cycle, uint32_t srcId) {
     MESIState* state = &array[lineId];
@@ -86,6 +84,7 @@ uint64_t MESIBottomCC::processEviction(Address wbLineAddr, uint32_t lineId, bool
 
 uint64_t MESIBottomCC::processAccess(Address lineAddr, uint32_t lineId, AccessType type, uint64_t cycle, uint32_t srcId, uint32_t flags) {
     uint64_t respCycle = cycle;
+
     MESIState* state = &array[lineId];
     switch (type) {
         // A PUTS/PUTX does nothing w.r.t. higher coherence levels --- it dies here
@@ -151,6 +150,22 @@ uint64_t MESIBottomCC::processAccess(Address lineAddr, uint32_t lineId, AccessTy
     return respCycle;
 }
 
+uint64_t MESIBottomCC::processBypass(uint64_t lineAddr, AccessType type, uint32_t childId, MESIState* state, uint64_t cycle, MESIState initialState, uint32_t srcId, uint32_t flags) { // add by shen
+    uint64_t respCycle = cycle;
+    uint32_t parentId = getParentId(lineAddr);
+    info("process bypassing, access the parent cache");
+    MemReq thisReq = {lineAddr, type, childId, state, cycle, &ccLock, initialState, srcId, flags}; // just change the lock
+
+    uint32_t nextLevelLat = parents[parentId]->access(thisReq) - cycle;
+    uint32_t netLat = parentRTTs[parentId];
+    profGETNextLevelLat.inc(nextLevelLat);
+    profGETNetLat.inc(netLat);
+    respCycle += nextLevelLat + netLat;
+    //profGETSMiss.inc();
+    assert_msg(respCycle >= cycle, "XXX %ld %ld", respCycle, cycle);
+    return respCycle;
+}
+
 void MESIBottomCC::processWritebackOnAccess(Address lineAddr, uint32_t lineId, AccessType type) {
     MESIState* state = &array[lineId];
     assert(*state == M || *state == E);
@@ -195,7 +210,6 @@ uint64_t MESIBottomCC::processNonInclusiveWriteback(Address lineAddr, AccessType
     uint64_t respCycle = parents[getParentId(lineAddr)]->access(req);
     return respCycle;
 }
-
 
 /* MESITopCC implementation */
 

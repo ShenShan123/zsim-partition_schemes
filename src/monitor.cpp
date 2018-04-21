@@ -136,13 +136,15 @@ void UMonMonitor::reset() {
     missCacheValid = false;
 }
 
-ReuseDistMonitor::ReuseDistMonitor(uint32_t _numPartitions, uint32_t _bankSets, uint32_t _samplerSets, uint32_t _intLength, uint32_t _window) : 
-    PartitionMonitor(0), monitors(_numPartitions, nullptr) 
+
+// ========================== RD monitor ==========================, by shen
+ReuseDistMonitor::ReuseDistMonitor(uint32_t _numPartitions, HashFamily* _hf, uint32_t _bankSets, uint32_t _samplerSets, uint32_t _buckets, uint32_t _max, uint32_t _window) : 
+    PartitionMonitor(_buckets), monitors(_numPartitions, nullptr) 
 {
     assert(_numPartitions > 0);
 
     for (auto& monitor : monitors)
-        monitor = new ReuseDistSampler(_bankSets, _samplerSets, _intLength, _window);
+        monitor = new ReuseDistSampler(_hf, _bankSets, _samplerSets, _buckets, _max, _window);
 }
 
 ReuseDistMonitor::~ReuseDistMonitor() {

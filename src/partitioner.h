@@ -124,9 +124,10 @@ class UMonMonitor : public PartitionMonitor {
         g_vector<UMon*> monitors;       // individual monitors per partition
 };
 
+// add the reuse distance monitor for partitioning scheme, by shen
 class ReuseDistMonitor : public PartitionMonitor {
     public:
-        ReuseDistMonitor(uint32_t _numPartitions, uint32_t _bankSets, uint32_t _samplerSets, uint32_t _intLength, uint32_t _window);
+        ReuseDistMonitor(uint32_t _numPartitions, HashFamily* _hf, uint32_t _bankSets, uint32_t _samplerSets, uint32_t _buckets, uint32_t _max, uint32_t _window);
         ~ReuseDistMonitor();
 
         uint32_t getNumPartitions() const { return monitors.size(); }

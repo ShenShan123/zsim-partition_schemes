@@ -64,7 +64,10 @@ uint64_t Cache::access(MemReq& req) {
     bool skipAccess = cc->startAccess(req); //may need to skip access due to races (NOTE: may change req.type!)
     if (likely(!skipAccess)) {
         bool updateReplacement = (req.type == GETS) || (req.type == GETX);
+        //info("before lookup, lineAddr %lx, req type %d, req srcId %d, req childId %d, req statsptr %lx", req.lineAddr, req.type, req.srcId, req.childId, (uint64_t)req.state);
         int32_t lineId = array->lookup(req.lineAddr, &req, updateReplacement);
+        //int32_t lineId = array->lookup(0, nullptr, updateReplacement);
+
         respCycle += accLat;
 
         if (lineId == -1 && cc->shouldAllocate(req)) {
@@ -73,11 +76,14 @@ uint64_t Cache::access(MemReq& req) {
             lineId = array->preinsert(req.lineAddr, &req, &wbLineAddr); //find the lineId to replace
             trace(Cache, "[%s] Evicting 0x%lx", name.c_str(), wbLineAddr);
 
-            //Evictions are not in the critical path in any sane implementation -- we do not include their delays
-            //NOTE: We might be "evicting" an invalid line for all we know. Coherence controllers will know what to do
-            cc->processEviction(req, wbLineAddr, lineId, respCycle); //1. if needed, send invalidates/downgrades to lower level
-
-            array->postinsert(req.lineAddr, &req, lineId); //do the actual insertion. NOTE: Now we must split insert into a 2-phase thing because cc unlocks us.
+            // if no candidate is found to evict (i.e. lineId == numLines), just bypass. this is the situation where PDP replacement policy bypass this access, by shen
+            if (lineId != (int32_t)numLines) { 
+                //Evictions are not in the critical path in any sane implementation -- we do not include their delays
+                //NOTE: We might be "evicting" an invalid line for all we know. Coherence controllers will know what to do
+                cc->processEviction(req, wbLineAddr, lineId, respCycle); //1. if needed, send invalidates/downgrades to lower level
+    
+                array->postinsert(req.lineAddr, &req, lineId); //do the actual insertion. NOTE: Now we must split insert into a 2-phase thing because cc unlocks us.
+            } //else lineId = -1;
         }
         // Enforce single-record invariant: Writeback access may have a timing
         // record. If so, read it.
@@ -87,8 +93,9 @@ uint64_t Cache::access(MemReq& req) {
         if (unlikely(evRec && evRec->hasRecord())) {
             wbAcc = evRec->popRecord();
         }
-
+        info("cc processes accessing");
         respCycle = cc->processAccess(req, lineId, respCycle);
+        info("cc done accessing");
 
         // Access may have generated another timing record. If *both* access
         // and wb have records, stitch them together
@@ -120,6 +127,7 @@ uint64_t Cache::access(MemReq& req) {
     }
 
     cc->endAccess(req);
+    info("cc return accessing");
 
     assert_msg(respCycle >= req.cycle, "[%s] resp < req? 0x%lx type %s childState %s, respCycle %ld reqCycle %ld",
             name.c_str(), req.lineAddr, AccessTypeName(req.type), MESIStateName(*req.state), respCycle, req.cycle);

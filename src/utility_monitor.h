@@ -81,7 +81,7 @@ class UMon : public GlobAlloc {
 };
 
 /* for recording distribution into a Histogram, 
-   Accur is the accuracy of transforming calculation */
+   Accur is the accuracy of transforming calculation, by shen */
 template <class B = uint32_t>
 class Histogram : public GlobAlloc
 {
@@ -113,12 +113,24 @@ class Histogram : public GlobAlloc
     
         Histogram<B> & operator+=(const Histogram<B> & rhs);
     
-        inline void sample(int x, uint16_t n = 1);
+        inline void sample(int x, uint16_t n = 1)
+        {
+            /* the sample number must less than max size of bins */
+            assert(x < size && x >= 0);
+            bins[x] += n;
+            /* calculate the total num of sampling */
+            samples += n;
+        };
     
         const B getSamples() const; 
     
         //void print(std::ofstream & file);
         void print();
+
+        inline B getValue(int i) const {
+            assert(i < size && i >= 0);
+            return bins[i];
+        }
 };
 
 /* calculate log2(s) + 1 */
@@ -141,7 +153,7 @@ inline T log2p1(T s)
 #define DOLOG(x) x
 #endif
 
-/* do reuse distance statistics */
+/* do reuse distance statistics, details in MICRO 2012 PDP paper, add by shen */
 class ReuseDistSampler : public GlobAlloc 
 {
     private:
@@ -151,20 +163,24 @@ class ReuseDistSampler : public GlobAlloc
         uint32_t* indices;
         uint32_t intervalLength; // must be 2^n
         uint32_t sampleWindow;
+        uint32_t step; // step counter, Sc in the PDP peper
         uint32_t* sampleCntrs;
         uint32_t* residuals;
-        uint32_t maxRd;
+        uint32_t maxRd; // it should be 2^n - 1, all rds range in [0, maxRd]
         uint32_t dssRate; // we sample one set every "dssRate" sets, must be 2^n
         uint32_t samplerSets;
         uint32_t bankSets;
         MTRand rng;
-        Histogram<uint32_t> rdv;
+        Histogram<uint32_t>* rdv; // the maxRd + 1 should be multiple of RDV size, so that the rdv can be filled up by all RDs
+        uint32_t rdvSize;
         //Used in masks for set indices and sampling factor descisions
         HashFamily* hf; // we calculate the RD for each set, so the hash function using in cache array is needed
     public:
-        ReuseDistSampler(uint32_t _bankSets, uint32_t _samplerSets, uint32_t _intLength, uint32_t _window = 0);
+        ReuseDistSampler(HashFamily* _hf, uint32_t _bankSets, uint32_t _samplerSets, uint32_t _buckets, uint32_t _max, uint32_t _window);
     
         ~ReuseDistSampler();
+
+        const uint32_t getSet(uint64_t addr);
     
         uint32_t cleanOldEntry();
     
@@ -175,6 +191,11 @@ class ReuseDistSampler : public GlobAlloc
         void print();
 
         void clear();
+
+        uint32_t getStep() const { return step; }
+
+        inline const uint32_t getRdvBin(uint32_t b) { return rdv->getValue(b); }
+        const uint32_t getRdvSize() { return rdvSize; }
 };
 
 #endif  // UTILITY_MONITOR_H_

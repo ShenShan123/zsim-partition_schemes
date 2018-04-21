@@ -173,7 +173,8 @@ class WayPartReplPolicy : public PartReplPolicy, public LegacyReplPolicy {
 
             //Update partitioner...
             monitor->access(e->p, e->addr);
-            rdMonitor->access(e->p, e->addr);
+            if (rdMonitor != nullptr)
+                rdMonitor->access(e->p, e->addr);
         }
 
         void hitUpdate(uint32_t id, const MemReq* req) { update(id, req); } //sxj
