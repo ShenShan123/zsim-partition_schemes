@@ -246,37 +246,13 @@ template <class B>
 void Histogram<B>::print()
 //void Histogram<B>::print(std::ofstream & file)
 {
-    //file.write((char *)bins, sizeof(B) * size);
-    //for (int i = 0; i < size; ++i)
-        //file << bins[i] << " ";
-    //file  << "\n";
-
     // just for test
     info("RDV print: [0] %d, [%d] %d, total samples: %d", bins[0], size - 1, bins[size-1], samples);
-    std::ofstream outfile("rdvout.dat", ios::app); // **sxj used for set up an output file
-    //outfile << "hit counts = " << hitCounts <<", miss counts = " << missCounts << endl; // **sxj
-    //uint32_t hitRate = hitCounts/(hitCounts+missCounts);
-    //outfile << "hit counts = " << hitCounts <<", miss counts = " << missCounts << ", hit rate = " << hitRate << endl; // **sxj
-    for (int i = 0; i < size; i++) {
-        outfile << " " << bins[i]; // **sxj 
-    }
-    outfile << endl;
-    outfile.close();
-
 }
-
-/*
-template <class B>
-B Histogram<B>::getValue(int i) const {
-    assert(x < size && x >= 0);
-    return bins[i];
-}
-*/
 
 // ==================== ReuseDistSampler class ====================, implemented by shen
 ReuseDistSampler::ReuseDistSampler(HashFamily* _hf, uint32_t _bankSets, uint32_t _samplerSets, uint32_t _buckets, uint32_t _max, uint32_t _window) 
-    : hitCounts(0), missCounts(0), // **sxj
-    indices(nullptr), intervalLength(_max), sampleWindow(_window), step((_max + 1) / _buckets), sampleCntrs(nullptr), residuals(nullptr), maxRd(_max),
+    : indices(nullptr), intervalLength(_max), sampleWindow(_window), step((_max + 1) / _buckets), sampleCntrs(nullptr), residuals(nullptr), maxRd(_max),
     dssRate(_bankSets / _samplerSets), samplerSets(_samplerSets), bankSets(_bankSets), hf(_hf)
 {
     assert(_bankSets >= _samplerSets);
@@ -294,7 +270,8 @@ ReuseDistSampler::ReuseDistSampler(HashFamily* _hf, uint32_t _bankSets, uint32_t
     rdv = new Histogram<uint32_t>(_buckets);
     rdvSize = rdv->getSize();
 
-    info("ReuseDistSampler, sampling rate 1/%d, number of sampler sets %d, max RD %d, RDV buckets: %d, sampling window size %d", dssRate, samplerSets, _max, rdv->getSize(), _window);
+    info("ReuseDistSampler, sampling rate 1/%d, number of sampler sets %d, max RD %d, RDV buckets: %d, sampling window size %d", 
+        dssRate, samplerSets, _max, rdv->getSize(), _window);
 }
 
 ReuseDistSampler::~ReuseDistSampler() 
@@ -336,8 +313,6 @@ uint32_t ReuseDistSampler::cleanOldEntry()
     return maxNum;
 }*/
 
-const uint32_t ReuseDistSampler::getSet(uint64_t addr) { return hf->hash(0, addr) & (bankSets - 1); }
-
 void ReuseDistSampler::access(uint64_t addr)
 {
     uint32_t set = getSet(addr);
@@ -349,20 +324,10 @@ void ReuseDistSampler::access(uint64_t addr)
     assert(ss < samplerSets);
 
     uint32_t & index = ++indices[ss];
-    // increase the index counter and see if a new interval starts!
-    /*if ( (++index & (intervalLength - 1)) == 0 ) {
-        index = 0;
-        //uint32_t delNodes = cleanOldEntry();
-        rdv.print();
-        rdv.clear();
-        //info("addrMap old size: %d, new size: %d", (int)addrMap.size() + delNodes, (int)addrMap.size());
-        info("addrMap new size: %d", (int)addrMap.size());
-    }*/
 
     auto pos = addrMap.find(addr);
 
     if (pos != addrMap.end()) {
-        hitCounts++; // **sxj
         uint32_t rd = index - pos->second - 1; 
         //info("rd = %d", rd);
         // for the sampling scheme, rd-counter is clear when finish rd calculation
@@ -377,8 +342,6 @@ void ReuseDistSampler::access(uint64_t addr)
         else
             rdv->sample(DOLOG(rd) / step);
     }
-    else
-        missCounts++; // **sxj
 
     // for sampline scheme 
     if (sampleWindow && sampleCntrs[ss]) {
@@ -400,24 +363,14 @@ void ReuseDistSampler::access(uint64_t addr)
     else {
         addrMap[addr] = index;
     }
-}
-
-void ReuseDistSampler::print() { // **sxj
-    std::ofstream outfile("rdvout.dat", ios::app); // **sxj 用于建立输出文件
-    double hitRate = 100*((double)hitCounts)/((double)(hitCounts+missCounts)); // **sxj change to the double for percentage
-    outfile << "hit counts = " << hitCounts <<", miss counts = " << missCounts << ", hit rate = " << hitRate << endl; // **sxj
-    outfile.close(); // **sxj
+    //info("access rd sampler, size: %d, rdv samples: %d", (int)addrMap.size(), rdv->getSamples());
 }
 
 void ReuseDistSampler::clear() {
     info("cleaning, addrMap size: %d", (int)addrMap.size());
     addrMap.clear(); 
-    print(); // **sxj try to call another func
     rdv->print();
     rdv->clear();
-    hitCounts = 0; // **sxj
-    missCounts = 0; // **sxj
-
 
     for (uint32_t i = 0; i < samplerSets; ++i) {
         indices[i] = 0;

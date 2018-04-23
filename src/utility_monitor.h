@@ -29,6 +29,7 @@
 #include "galloc.h"
 #include "memory_hierarchy.h"
 #include "stats.h"
+#include "hash.h"
 // add by shen
 #include "mtrand.h"
 #include "g_std/g_unordered_map.h"
@@ -37,7 +38,7 @@
 #define UMON_INFO 1
 //#define UMON_INFO 1
 
-class HashFamily;
+//class HashFamily;
 
 class UMon : public GlobAlloc {
     private:
@@ -122,7 +123,7 @@ class Histogram : public GlobAlloc
             samples += n;
         };
     
-        const B getSamples() const; 
+        const B getSamples() const { return samples; }; 
     
         //void print(std::ofstream & file);
         void print();
@@ -158,8 +159,6 @@ class ReuseDistSampler : public GlobAlloc
 {
     private:
         g_unordered_map<uint64_t, uint32_t> addrMap;
-        uint32_t hitCounts; // **sxj hit counts
-        uint32_t missCounts; // **sxj miss counts
         uint32_t* indices;
         uint32_t intervalLength; // must be 2^n
         uint32_t sampleWindow;
@@ -180,7 +179,7 @@ class ReuseDistSampler : public GlobAlloc
     
         ~ReuseDistSampler();
 
-        const uint32_t getSet(uint64_t addr);
+        inline const uint32_t getSet(uint64_t addr) { return hf->hash(0, addr) & (bankSets - 1); }
     
         uint32_t cleanOldEntry();
     

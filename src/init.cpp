@@ -164,10 +164,11 @@ BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, 
         uint32_t maxRd = config.get<uint32_t>(prefix + "repl.maxRd", 255);
         uint32_t distance = config.get<uint32_t>(prefix + "repl.distance", 8);
         uint32_t window = config.get<uint32_t>(prefix + "repl.window", 8);
+        uint32_t period = config.get<uint32_t>(prefix + "repl.period", 2 * 1024 * 1024);
         // PDP need reuse distance sampler
         ReuseDistSampler* rdSampler = new ReuseDistSampler(hf, numSets, samplerSets, buckets, maxRd, window);
         if (arrayType != "SetAssoc") panic("PDP replacement requires SetAssoc array");
-        rp = new PDPReplPolicy(numLines, numSets, ways, candidates, rdSampler, distance, nonInclusiveHack);
+        rp = new PDPReplPolicy(numLines, ways, rdSampler, distance, nonInclusiveHack, period);
     } else if (replType == "LFU") {
         rp = new LFUReplPolicy(numLines);
     } else if (replType == "LRUProfViol") {
@@ -180,8 +181,9 @@ BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, 
         rp = new NRUReplPolicy(numLines, candidates);
     } else if (replType == "Rand") {
         rp = new RandReplPolicy(candidates);
-    } else if (replType == "WayPart" || replType == "Vantage" || replType == "IdealLRUPart" || replType == "FS" || replType == "PriSM") {
+    } else if (replType == "WayPart" || replType == "Vantage" || replType == "IdealLRUPart" || replType == "FS" || replType == "PriSM" || replType == "PDPart") {
         if (replType == "WayPart" && arrayType != "SetAssoc") panic("WayPart replacement requires SetAssoc array");
+        if (replType == "PDPart" && arrayType != "SetAssoc") panic("PDPart replacement requires SetAssoc array");
 
         //Partition mapper
         // TODO: One partition mapper per cache (not bank).
@@ -212,20 +214,21 @@ BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, 
         } else { //Vantage or Ideal
             buckets = config.get<uint32_t>(prefix + "repl.buckets", 256);
         }
+        // change the partition monitor for PDPart scheme, by shen
+        PartitionMonitor* mon = nullptr;
 
-        PartitionMonitor* mon = new UMonMonitor(numLines, umonLines, umonWays, pm->getNumPartitions(), buckets);
-
-        // reuse distance sampler! by shen
-        PartitionMonitor* rdMon = nullptr;
-        string monitor = config.get<const char*>(prefix + "repl.monitor", "None");
-
-        if (monitor == "rdMonitor") {
-            uint32_t samplerSets = config.get<uint32_t>(prefix + "repl.samplerSets", 256);
-            uint32_t buckets = config.get<uint32_t>(prefix + "repl.buckets", 256);
-            uint32_t maxRd = config.get<uint32_t>(prefix + "repl.maxRd", 1023);
-            uint32_t window = config.get<uint32_t>(prefix + "repl.window", 0);
-            rdMon = new ReuseDistMonitor(pm->getNumPartitions(), hf, numSets, samplerSets, buckets, maxRd, window);
+        if (replType == "PDPart") {
+            uint32_t samplerSets = config.get<uint32_t>(prefix + "repl.samplerSets", 64);
+            //uint32_t buckets = config.get<uint32_t>(prefix + "repl.buckets", 64);
+            uint32_t maxRd = config.get<uint32_t>(prefix + "repl.maxRd", 255);
+            uint32_t window = config.get<uint32_t>(prefix + "repl.window", 8);
+            mon = new ReuseDistMonitor(pm->getNumPartitions(), hf, numSets, samplerSets, buckets, maxRd, window);
         }
+        else 
+            mon = new UMonMonitor(numLines, umonLines, umonWays, pm->getNumPartitions(), buckets);
+        // end, by shen
+
+        string monitor = config.get<const char*>(prefix + "repl.monitor", "None");
 
         //Finally, instantiate the repl policy
         PartReplPolicy* prp;
@@ -233,7 +236,7 @@ BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, 
         if (replType == "WayPart") {
             //if set, drives partitioner but doesn't actually do partitioning
             bool testMode = config.get<bool>(prefix + "repl.testMode", false);
-            prp = new WayPartReplPolicy(mon, pm, numLines, ways, testMode, rdMon);
+            prp = new WayPartReplPolicy(mon, pm, numLines, ways, testMode);
         } else if (replType == "IdealLRUPart") {
             prp = new IdealLRUPartReplPolicy(mon, pm, numLines, buckets);
         } else if (replType == "Vantage") {
@@ -242,18 +245,26 @@ BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, 
             bool smoothTransients = config.get<bool>(prefix + "repl.smoothTransients", false);
             prp = new VantageReplPolicy(mon, pm, numLines, assoc, (uint32_t)(allocPortion * 100), 10, 50, buckets, smoothTransients);
             //prp = new VantageReplPolicy(mon, pm, numLines, assoc, (uint32_t)(allocPortion * 100), 10, 50, buckets, false);
-        } else if (replType == "PriSM"){
+        } else if (replType == "PriSM"){ // by shen
             uint32_t assoc = (arrayType == "Z")? candidates : ways;
             prp = new PriSM(mon, pm, numLines, assoc, buckets);
-        } else { // FS
+        } else if (replType == "FS") { // FS
             uint32_t assoc = (arrayType == "Z")? candidates : ways;
             prp = new FutilityScaling(mon, pm, numLines, assoc, buckets);
-        }
+        } else { // PDP
+            uint32_t sd = config.get<uint32_t>(prefix + "repl.sd", 1);
+            uint32_t period = config.get<uint32_t>(prefix + "repl.period", 2 * 1024 * 1024);
+            prp = new PDPartReplPolicy(mon, pm, hf, numLines, ways, sd, nonInclusiveHack, period);
+        } // end, by shen
         rp = prp;
 
         // Partitioner
         // TODO: Depending on partitioner type, we want one per bank or one per cache.
-        Partitioner* p = new LookaheadPartitioner(prp, pm->getNumPartitions(), buckets, 1, allocPortion);
+        Partitioner* p = nullptr;
+        if (replType == "PDPart")
+            p = new PDPartitioner(prp, pm->getNumPartitions());
+        else
+            p = new LookaheadPartitioner(prp, pm->getNumPartitions(), buckets, 1, allocPortion);
 
         //Schedule its tick
         uint32_t interval = config.get<uint32_t>(prefix + "repl.interval", 5000); //phases

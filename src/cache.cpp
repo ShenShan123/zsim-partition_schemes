@@ -93,9 +93,9 @@ uint64_t Cache::access(MemReq& req) {
         if (unlikely(evRec && evRec->hasRecord())) {
             wbAcc = evRec->popRecord();
         }
-        info("cc processes accessing");
+        //info("cc processes accessing");
         respCycle = cc->processAccess(req, lineId, respCycle);
-        info("cc done accessing");
+        //info("cc done accessing");
 
         // Access may have generated another timing record. If *both* access
         // and wb have records, stitch them together
@@ -127,7 +127,7 @@ uint64_t Cache::access(MemReq& req) {
     }
 
     cc->endAccess(req);
-    info("cc return accessing");
+    //info("cc return accessing");
 
     assert_msg(respCycle >= req.cycle, "[%s] resp < req? 0x%lx type %s childState %s, respCycle %ld reqCycle %ld",
             name.c_str(), req.lineAddr, AccessTypeName(req.type), MESIStateName(*req.state), respCycle, req.cycle);

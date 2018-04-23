@@ -322,7 +322,7 @@ class MESICC : public CC {
              * both parent's locks. So, we first handle races, which may cause us to skip the access.
              */
             bool skipAccess = CheckForMESIRace(req.type /*may change*/, req.state, req.initialState);
-            info("start access and get the lock, skip %d", skipAccess);
+            //info("start access and get the lock, skip %d", skipAccess);
 
             return skipAccess;
         }
@@ -388,7 +388,7 @@ class MESICC : public CC {
         }
 
         void endAccess(const MemReq& req) {
-            info("end accessing");
+            //info("end accessing");
             //Relock child before we unlock ourselves (hand-over-hand)
             if (req.childLock) {
                 futex_lock(req.childLock);
@@ -396,7 +396,7 @@ class MESICC : public CC {
 
             bcc->unlock();
             tcc->unlock();
-            info("end accessing, unlock");
+            //info("end accessing, unlock");
         }
 
         //Inv methods

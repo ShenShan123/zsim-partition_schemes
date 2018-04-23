@@ -65,16 +65,31 @@ namespace lookahead {
 
 class LookaheadPartitioner : public Partitioner {
     public:
-        LookaheadPartitioner(PartReplPolicy* _repl, uint32_t _numPartitions, uint32_t _buckets,
-                             uint32_t _minAlloc = 1, double _allocPortion = 1.0, bool* _forbidden = nullptr);
-        void partition();
+        LookaheadPartitioner(PartReplPolicy* _repl, uint32_t _numPartitions, uint32_t _buckets, 
+            uint32_t _minAlloc = 1, double _allocPortion = 1.0, bool* _forbidden = nullptr);
 
+        void partition();
+    
     private:
         PartReplPolicy* repl;
         uint32_t numPartitions;
         uint32_t buckets;
         uint32_t* curAllocs;
 };
+
+class PDPartitioner : public Partitioner { // TODO: the PD calculation could be implemented here, by shen
+    public:
+        PDPartitioner(PartReplPolicy* _repl, uint32_t _numPartitions, uint32_t _minAlloc = 1, double _allocPortion = 1.0, bool* _forbidden = nullptr)
+        : Partitioner(_minAlloc, _allocPortion, _forbidden)
+        , repl(_repl)
+        , numPartitions(_numPartitions) {}
+
+        void partition() {};
+
+    private:
+        PartReplPolicy* repl;
+        uint32_t numPartitions;
+}; // end, by shen
 
 // *********************************************************************
 
@@ -98,6 +113,8 @@ class PartitionMonitor : public GlobAlloc {
 
         uint32_t getBuckets() const { return buckets; }
 
+        virtual void* getMonitor(uint32_t p) const = 0; // add by shen
+
     protected:
         uint32_t buckets;
 };
@@ -114,6 +131,7 @@ class UMonMonitor : public PartitionMonitor {
         uint32_t get(uint32_t partition, uint32_t bucket) const;
         uint32_t getNumAccesses(uint32_t partition) const;
         void reset();
+        void* getMonitor(uint32_t p) const; // add by shen
 
     private:
         void getMissCurves() const;
@@ -125,7 +143,7 @@ class UMonMonitor : public PartitionMonitor {
 };
 
 // add the reuse distance monitor for partitioning scheme, by shen
-class ReuseDistMonitor : public PartitionMonitor {
+class ReuseDistMonitor : public PartitionMonitor{
     public:
         ReuseDistMonitor(uint32_t _numPartitions, HashFamily* _hf, uint32_t _bankSets, uint32_t _samplerSets, uint32_t _buckets, uint32_t _max, uint32_t _window);
         ~ReuseDistMonitor();
@@ -136,9 +154,10 @@ class ReuseDistMonitor : public PartitionMonitor {
         uint32_t get(uint32_t partition, uint32_t bucket) const { return 0; };
         uint32_t getNumAccesses(uint32_t partition) const { return 0; };
         void reset();
+        void* getMonitor(uint32_t p) const;
 
     private:
-        g_vector<ReuseDistSampler*> monitors;       // individual monitors per partition
+        g_vector<ReuseDistSampler*> monitors;
 };
 
 #endif  // PARTITIONER_H_

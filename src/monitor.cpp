@@ -136,6 +136,9 @@ void UMonMonitor::reset() {
     missCacheValid = false;
 }
 
+void* UMonMonitor::getMonitor(uint32_t p) const {
+    return reinterpret_cast<void*>(monitors[p]); // be careful!!
+}
 
 // ========================== RD monitor ==========================, by shen
 ReuseDistMonitor::ReuseDistMonitor(uint32_t _numPartitions, HashFamily* _hf, uint32_t _bankSets, uint32_t _samplerSets, uint32_t _buckets, uint32_t _max, uint32_t _window) : 
@@ -164,15 +167,10 @@ void ReuseDistMonitor::access(uint32_t partition, Address lineAddr) {
 }
 
 void ReuseDistMonitor::reset() {
-    int partitionNum = 0; // **sxj
-    //std::ofstream outfile("rdvout.dat", ios::app); // **sxj 用于建立输出文件
-    //outfile << "partition " << partitionNum + 1 << ":" << endl;
-    //outfile.close();
-    for (auto monitor : monitors){
-	std::ofstream outfile("rdvout.dat", ios::app); // **sxj 用于建立输出文件
-	outfile << "partition " << partitionNum + 1 << ":" << endl;
-        outfile.close();
+    for (auto monitor : monitors)
         monitor->clear();
-        partitionNum++; // **sxj
-    }
+}
+
+void* ReuseDistMonitor::getMonitor(uint32_t p) const {
+    return reinterpret_cast<void*>(monitors[p]); // be careful!!
 }

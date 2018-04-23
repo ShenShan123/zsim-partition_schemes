@@ -49,17 +49,15 @@ class PartReplPolicy : public virtual ReplPolicy {
     protected:
         PartitionMonitor* monitor;
         PartMapper* mapper;
-        PartitionMonitor* rdMonitor;
 
     public:
-        PartReplPolicy(PartitionMonitor* _monitor, PartMapper* _mapper, PartitionMonitor* _rdMonitor = nullptr) : monitor(_monitor), mapper(_mapper), rdMonitor(_rdMonitor) {}
-        ~PartReplPolicy() { delete monitor; delete rdMonitor; }
+        PartReplPolicy(PartitionMonitor* _monitor, PartMapper* _mapper) : monitor(_monitor), mapper(_mapper) {}
+        ~PartReplPolicy() { delete monitor; }
 
         virtual void setPartitionSizes(const uint32_t* sizes) = 0;
 
         PartitionMonitor* getMonitor() { return monitor; }
-        // return the RD monitor, by shen
-        PartitionMonitor* getRdMonitor() { return rdMonitor; }
+
         const PartitionMonitor* getMonitor() const { return monitor; }
 };
 
@@ -96,8 +94,8 @@ class WayPartReplPolicy : public PartReplPolicy, public LegacyReplPolicy {
         uint64_t timestamp;
 
     public:
-        WayPartReplPolicy(PartitionMonitor* _monitor, PartMapper* _mapper, uint64_t _lines, uint32_t _ways, bool _testMode, PartitionMonitor* _rdMonitor)
-                : PartReplPolicy(_monitor, _mapper, _rdMonitor), totalSize(_lines), ways(_ways), testMode(_testMode)
+        WayPartReplPolicy(PartitionMonitor* _monitor, PartMapper* _mapper, uint64_t _lines, uint32_t _ways, bool _testMode)
+                : PartReplPolicy(_monitor, _mapper), totalSize(_lines), ways(_ways), testMode(_testMode)
         {
             partitions = mapper->getNumPartitions();
             waySize = totalSize/ways; // start with evenly sized partitions
@@ -173,8 +171,6 @@ class WayPartReplPolicy : public PartReplPolicy, public LegacyReplPolicy {
 
             //Update partitioner...
             monitor->access(e->p, e->addr);
-            if (rdMonitor != nullptr)
-                rdMonitor->access(e->p, e->addr);
         }
 
         void hitUpdate(uint32_t id, const MemReq* req) { update(id, req); } //sxj
@@ -1205,6 +1201,256 @@ class PriSM : public PartReplPolicy, public LegacyReplPolicy {
                 partInfo[p].targetSize = s[p];
             }
         }
+};
+
+class HashFamily;
+/* Protecting Distance based Partition scheme, the details are in MICRO 2012 , by shen */
+class PDPartReplPolicy : public PartReplPolicy, public PDPReplPolicy {
+    private:
+        HashFamily* hf; // just for get the set index, but no common API can use
+
+        struct PdPartInfo : public PartInfo {
+            uint64_t pd;
+            uint32_t accsCntr;
+            Counter profInsertions;
+            Counter profEvictions;
+            Counter profSizeCycles;
+        };
+        
+        PdPartInfo* partInfo;
+        uint32_t partitions;
+        //uint32_t partGranularity // there is no partition granularity at all !!
+        //uint32_t totalSize; //i.e. numLines in PDPReplPolicy
+
+        /*struct PartLineInfo { // has been defined in PDPReplPolicy
+            Address addr; //FIXME: This is redundant due to the replacement policy interface
+            uint64_t ts; //timestamp, >0 if in the cache, == 0 if line is empty (little significance otherwise)
+            uint32_t p; //partition ID
+            uint8_t rpd; // RPD in paper
+            bool reuse; // the reuse bit
+        };*/
+
+        //PartLineInfo* array;
+
+        Counter profUpdateCycles;
+
+        //Repl process stuff
+        //uint32_t* candList; replacing by the candArray in PDPReplPolicy
+        uint32_t incomingLinePart; //to what partition does the incoming line belong?
+        Address incomingLineAddr;
+
+        //Globally incremented, but bears little significance per se
+        uint64_t timestamp; // global timestamp
+
+        uint64_t lastUpdateCycle; //for cumulative size counter updates; could be made event-driven
+
+    public:
+        // the monitor for Futility Scaling scheme is UCP for default
+        PDPartReplPolicy(PartitionMonitor* _monitor, PartMapper* _mapper, HashFamily* _hf, uint32_t _lines, 
+            uint32_t _assoc, uint32_t _maxSd, bool _nonInclusive, uint32_t _period)
+        : PartReplPolicy(_monitor, _mapper), PDPReplPolicy(_lines, _assoc, nullptr, _maxSd, _nonInclusive, _period), hf(_hf)
+        {
+            partitions = mapper->getNumPartitions();
+            partInfo = gm_calloc<PdPartInfo>(partitions);
+
+            for (uint32_t i = 0; i < partitions; i++) {
+                partInfo[i].pd = (uint8_t) -1; // it's casual, just 8
+                //Need placement new, these objects have vptr
+                new (&partInfo[i].profHits) Counter;
+                new (&partInfo[i].profMisses) Counter;
+                new (&partInfo[i].profSelfEvictions) Counter;
+                new (&partInfo[i].profExtEvictions) Counter;
+                new (&partInfo[i].profInsertions) Counter;
+                new (&partInfo[i].profEvictions) Counter;
+                new (&partInfo[i].profSizeCycles) Counter;
+            }
+
+            //array = gm_calloc<PartLineInfo>(numLines);
+            assert(numLines >= partitions);
+
+            for (uint32_t i = 0; i < numLines; i++) {
+                array[i].p = 0; // just for now, we set all lines to the first partition
+            }
+            partInfo[0].size = numLines; // change the actual size
+
+            timestamp = 1;
+            lastUpdateCycle = 0;
+            info("Protecting Distance based RP: %d partitions", partitions);
+        }
+
+        ~PDPartReplPolicy() { gm_free(partInfo); }
+
+        void initStats(AggregateStat* parentStat) {
+            AggregateStat* rpStat = new AggregateStat();
+            rpStat->init("part", "Futility Scaling replacement policy stats");
+            ProxyStat* pStat;
+            //profUpdateCycles.init("updCycles", "Cycles of updates experienced on size-cycle counters"); rpStat->append(&profUpdateCycles);
+            for (uint32_t p = 0; p < partitions; p++) {
+                std::stringstream pss;
+                pss << "part-" << p;
+                AggregateStat* partStat = new AggregateStat();
+                partStat->init(gm_strdup(pss.str().c_str()), "Partition stats");
+
+                pStat = new ProxyStat(); pStat->init("sz", "Actual size", &partInfo[p].size); partStat->append(pStat);
+                //FIXME: Code and stats should be named similarly
+                pStat = new ProxyStat(); pStat->init("tgtSz", "Target size", &partInfo[p].targetSize); partStat->append(pStat);
+                partInfo[p].profHits.init("hits", "Hits"); partStat->append(&partInfo[p].profHits);
+                partInfo[p].profMisses.init("misses", "Misses"); partStat->append(&partInfo[p].profMisses);
+                partInfo[p].profSelfEvictions.init("selfEvs", "Evictions caused by us"); partStat->append(&partInfo[p].profSelfEvictions);
+                partInfo[p].profExtEvictions.init("extEvs", "Evictions caused by others"); partStat->append(&partInfo[p].profExtEvictions);
+                partInfo[p].profInsertions.init("ins", "Number of insertion"); partStat->append(&partInfo[p].profInsertions);
+                partInfo[p].profEvictions.init("evs", "Number of Evictions"); partStat->append(&partInfo[p].profEvictions);
+                pStat = new ProxyStat(); pStat->init("PD", "Protecting Distance", &partInfo[p].pd); partStat->append(pStat);
+                partInfo[p].profSizeCycles.init("szCycles", "Cumulative per-cycle sum of sz"); partStat->append(&partInfo[p].profSizeCycles);
+
+                rpStat->append(partStat);
+            }
+            parentStat->append(rpStat);
+        }
+
+        void update(uint32_t id, const MemReq* req) {
+            ++totAccs;
+            if (unlikely(zinfo->globPhaseCycles > lastUpdateCycle)) {
+                //Update size-cycle counter stats
+                uint64_t diff = zinfo->globPhaseCycles - lastUpdateCycle;
+                for (uint32_t p = 0; p < partitions; p++) {
+                    partInfo[p].profSizeCycles.inc(diff*partInfo[p].size);
+                }
+
+                profUpdateCycles.inc(diff);
+                lastUpdateCycle = zinfo->globPhaseCycles;
+            }
+
+            LineInfo* e = &array[id];
+            partInfo[e->p].accsCntr++;
+            assert(e->p < partitions);
+
+            if (e->ts > 0) {
+                assert(e->addr == req->lineAddr);
+                e->ts = timestamp++;
+                partInfo[e->p].profHits.inc();
+            } else { //post-miss update, old one has been removed, this is empty
+                e->ts = timestamp++;
+                partInfo[e->p].size--;
+                partInfo[e->p].profEvictions.inc();
+                partInfo[e->p].profSelfEvictions.inc(e->p == incomingLinePart);
+                partInfo[e->p].profExtEvictions.inc(e->p != incomingLinePart);
+                //zinfo("FS update: partition %d, number of evictions %d", (int)e->p, (int)partInfo[e->p].profEvictions.get());
+                partInfo[e->p].profMisses.inc();
+
+                // for the new part
+                assert(incomingLinePart < partitions);
+                e->p = incomingLinePart;
+                partInfo[e->p].size++;
+                partInfo[e->p].profInsertions.inc();
+            }
+
+            //Profile the access
+            monitor->access(e->p, e->addr);
+            uint32_t set = hf->hash(0, e->addr) & (numSets - 1);
+            ++distanceStep[set]; // every access, the distance step counter increase by 1
+            uint32_t first = set * assoc;
+            // if the distance step is maxSd, we decrement all RPDs of lines in this set
+            if (distanceStep[set] > maxSd - 1) {
+                distanceStep[set] = 0;
+                for (uint32_t id = first; id < assoc + first; ++id)
+                    array[id].rpd -= array[id].rpd != 0; // decreae every access to this set, the lines' saturating counter decrease
+            }
+        }
+
+        void hitUpdate(uint32_t id, const MemReq* req) { 
+            array[id].reuse = true; 
+            array[id].rpd = partInfo[array[id].p].pd / maxSd;
+
+            update(id, req);
+        }
+
+        //void hitUpdate(uint32_t id, const MemReq* req) { update(id, req); } //no need to override this method
+
+        void startReplacement(const MemReq* req) {
+            assert(candIdx == 0);
+            assert(bestId == -1);
+            incomingLinePart = mapper->getPartition(*req);
+            incomingLineAddr = req->lineAddr;
+        }
+
+        uint32_t getBestCandidate() {
+            uint32_t bestRpd = 0;
+            uint32_t bestInsrtRpd = 0;
+            int32_t bestProt = -1;
+            int32_t bestInsert = -1;
+            for (uint32_t i = 0; i < candIdx; ++i) {
+                LineInfo & cand = array[candArray[i]];
+                if (cand.rpd == 0) {
+                    bestId = candArray[i];
+                    break; // if we found the unprotected line, just break
+                }
+                else if (!cand.reuse && cand.rpd > bestInsrtRpd) { // there is a inserted line with no reuse
+                    bestInsert = candArray[i];
+                    bestInsrtRpd = cand.rpd;
+                }
+                else if (cand.rpd > bestRpd) { // the line with largest PD
+                    bestProt = candArray[i];
+                    bestRpd = cand.rpd;
+                }
+            }
+
+            if (bestId == -1 && nonInclusive) // if this is a non-inclusive cache, just bypoass this access
+                bestId = numLines;
+
+            bestId = bestId == -1 ? (bestInsert == -1 ? bestProt : bestInsert) : bestId;
+            assert(bestId != -1);
+            //info("best line %d, best inserted line %d, best protected line %d", bestId, bestInsert, bestProt);
+
+            if (totAccs < period)
+                return bestId;
+
+            // calculate the best PD every 512K access
+            totAccs = 0;
+            uint64_t numerator = 0; // Eq.2
+            uint64_t demoninator = 0; // Eq.2
+            uint8_t pdNum = 3;
+
+            for (uint32_t p = 0; p < partitions; ++p) {
+                uint8_t peaks[pdNum]; // the first three best PDs
+                uint32_t hits[pdNum]; // the corresponding hits (numerator in Eq.1)
+                uint64_t accsW[pdNum]; // the corresponding Access*W (demoninator in Eq.1)
+                double emMax = 0.0; // the maximum of overall hit rate for this partition
+                int8_t bestPdIdx = -1;
+                calcBestPd(partInfo[p].accsCntr, &peaks[0], &hits[0], &accsW[0], pdNum, reinterpret_cast<ReuseDistSampler*>(monitor->getMonitor(p)) );
+                // find the best PD for each partition
+                for (uint32_t i = 0; i < pdNum; ++i) {
+                    uint64_t tempNume = numerator + hits[i];
+                    uint64_t tempDemo = demoninator + accsW[i];
+                    double em = (double)tempNume / tempDemo;
+                    if (em > emMax) {
+                        bestPdIdx = i; // record the best PD's index for partition p
+                        emMax = em;
+                    }
+                }
+                
+                partInfo[p].pd = peaks[bestPdIdx]; // update the PD for this part
+                numerator += hits[bestPdIdx];
+                demoninator += accsW[bestPdIdx];
+                
+                info("partition %d: best PD = %d, hit rate = %f", p, peaks[bestPdIdx], (double)numerator / demoninator);
+            }
+
+            return bestId;
+        }
+
+        void replaced(uint32_t id) {
+            LineInfo* e = &array[id];
+            e->rpd = partInfo[e->p].pd / maxSd;
+            e->reuse = false;
+            candIdx = 0; //reset
+            bestId = -1;
+            e->ts = 0;
+            e->addr = incomingLineAddr;
+        }
+
+    private:
+        void setPartitionSizes(const uint32_t* sizes) {}
 };
 
 #endif  // PART_REPL_POLICIES_H_
