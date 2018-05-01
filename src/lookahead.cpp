@@ -170,3 +170,57 @@ void LookaheadPartitioner::partition() {
     repl->setPartitionSizes(curAllocs);
     repl->getMonitor()->reset();
 }
+
+
+// ============================= Hit Maximization Partitioner, added by shen =============================
+HitMaxPartitioner::HitMaxPartitioner(PartReplPolicy* _repl, uint32_t _numPartitions, uint32_t _buckets, uint32_t _minAlloc, double _allocPortion, bool* _forbidden)
+        : LookaheadPartitioner(_repl, _numPartitions, _buckets, _minAlloc, _allocPortion, _forbidden) {
+    info("HitMaxPartitioner uses the LoolaheadPartitioner");
+}
+
+void HitMaxPartitioner::partition() {
+    uint64_t totalGain = 0;
+    uint64_t potentialGain[numPartitions];
+
+    auto& monitor = *repl->getMonitor();
+
+    uint64_t standAloneMisses = 0;
+    uint64_t curPartMisses = 0;
+
+    for (uint32_t p = 0; p < numPartitions; p++) {
+        standAloneMisses = monitor.get(p, buckets - 1);
+        curPartMisses = monitor.get(p, curAllocs[p]);
+        assert(standAloneMisses <= curPartMisses);
+        potentialGain[p] = curPartMisses - standAloneMisses;
+        totalGain += potentialGain[p];
+    }
+
+    double bestAllocsFrac[numPartitions]; // Tcore in the paper
+    double totAlloc = 0.0;
+
+    for (uint32_t p = 0; p < numPartitions; p++) {
+        bestAllocsFrac[p] = curAllocs[p] * (1.0 + (double)potentialGain[p] / totalGain);
+        totAlloc += bestAllocsFrac[p];
+    }
+
+    uint32_t balance = buckets;
+
+    for (uint32_t p = 0; p < numPartitions; p++) {
+        bestAllocsFrac[p] /= totAlloc; // normalize the Tcore
+        curAllocs[p] = bestAllocsFrac[p] * buckets;
+
+        if (!curAllocs[p]) // if the partition has no resource
+            curAllocs[p] = buckets / numPartitions;
+        
+        balance -= curAllocs[p];
+        //info("partition %d allocates %d buckets", p, curAllocs[p]);
+    }
+
+    assert(balance <= buckets);
+    curAllocs[0] += balance; // add the residual caused by float point calculation to the first part
+    //info("partition 0 has the balance %d", balance);
+
+    repl->setPartitionSizes(curAllocs);
+    repl->getMonitor()->reset();
+}
+// end

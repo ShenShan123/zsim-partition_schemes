@@ -263,11 +263,13 @@ BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, 
         Partitioner* p = nullptr;
         if (replType == "PDPart")
             p = new PDPartitioner(prp, pm->getNumPartitions());
+        else if (replType == "PriSM")
+            p = new HitMaxPartitioner(prp, pm->getNumPartitions(), buckets, 1, allocPortion);
         else
             p = new LookaheadPartitioner(prp, pm->getNumPartitions(), buckets, 1, allocPortion);
 
         //Schedule its tick
-        uint32_t interval = config.get<uint32_t>(prefix + "repl.interval", 5000); //phases
+        uint32_t interval = config.get<uint32_t>(prefix + "repl.interval", 500); //phases, recompute every 5 million cycles, in the ISCA paper.
         zinfo->eventQueue->insert(new Partitioner::PartitionEvent(p, interval));
     } else {
         panic("%s: Invalid replacement type %s", name.c_str(), replType.c_str());

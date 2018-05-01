@@ -70,12 +70,21 @@ class LookaheadPartitioner : public Partitioner {
 
         void partition();
     
-    private:
+    protected:
         PartReplPolicy* repl;
         uint32_t numPartitions;
         uint32_t buckets;
         uint32_t* curAllocs;
 };
+
+// for PriSM Hit-Maximization algorithm, by shen
+class HitMaxPartitioner : public LookaheadPartitioner {
+    public:
+        HitMaxPartitioner(PartReplPolicy* _repl, uint32_t _numPartitions, uint32_t _buckets, uint32_t _minAlloc = 1, double _allocPortion = 1.0, bool* _forbidden = nullptr);
+
+        void partition();
+};
+// end
 
 class PDPartitioner : public Partitioner { // TODO: the PD calculation could be implemented here, by shen
     public:

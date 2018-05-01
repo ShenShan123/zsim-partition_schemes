@@ -183,7 +183,6 @@ struct GlobSimInfo {
     TraceDriver* traceDriver;
 };
 
-
 //Process-wide global variables, defined in zsim.cpp
 extern Core* cores[MAX_THREADS]; //tid->core array
 extern uint32_t procIdx;

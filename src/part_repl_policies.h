@@ -799,7 +799,6 @@ class FutilityScaling : public PartReplPolicy, public LegacyReplPolicy {
                 partInfo[e->p].profExtEvictions.inc(e->p != incomingLinePart);
                 //zinfo("FS update: partition %d, number of evictions %d", (int)e->p, (int)partInfo[e->p].profEvictions.get());
                 partInfo[e->p].evictions++;
-                partInfo[e->p].profMisses.inc();
 
                 // for the new part
                 assert(incomingLinePart < partitions);
@@ -807,6 +806,7 @@ class FutilityScaling : public PartReplPolicy, public LegacyReplPolicy {
                 partInfo[e->p].size++;
                 partInfo[e->p].profInsertions.inc();
                 partInfo[e->p].insertions++;
+                partInfo[e->p].profMisses.inc();
                 //info("FS update: partition %d, number of insertions %d", (int)e->p, (int)partInfo[e->p].profInsertions.get());
             }
 
@@ -1054,18 +1054,18 @@ class PriSM : public PartReplPolicy, public LegacyReplPolicy {
             } else { //post-miss update, old one has been removed, this is empty
                 interMissCounter++;
                 e->ts = timestamp++;
-                if (e->p != partitions) partInfo[e->p].interMisses++;
                 partInfo[e->p].size--;
                 partInfo[e->p].profEvictions.inc();
                 partInfo[e->p].profSelfEvictions.inc(e->p == incomingLinePart);
                 partInfo[e->p].profExtEvictions.inc(e->p != incomingLinePart);
-                partInfo[e->p].profMisses.inc();
 
                 // for the new part
                 assert(incomingLinePart < partitions);
                 e->p = incomingLinePart;
                 partInfo[e->p].size++;
+                partInfo[e->p].interMisses++;
                 partInfo[e->p].profInsertions.inc();
+                partInfo[e->p].profMisses.inc();
             }
 
             //Profile the access
@@ -1194,8 +1194,8 @@ class PriSM : public PartReplPolicy, public LegacyReplPolicy {
 
                 s[p] = totalSize * sizes[p] / partGranularity;// according to the init.cpp, for vantage, the partGranularity is 256, thus the num of UMON bins is way num
 #if UMON_INFO
-                info("part %d, %ld -> %d lines (now it's %ld lines); eviction prob: %d, granularity %d, alloc size %d, best partition: %d, no cands: %d;", 
-                    p, partInfo[p].targetSize, s[p], partInfo[p].size, partInfo[p].evictProb, partGranularity, sizes[p], bestPart, (int)profNoCand.get());
+                //info("part %d, %ld -> %d lines (now it's %ld lines); eviction prob: %d, granularity %d, alloc size %d, best partition: %d, no cands: %d;", 
+                    //p, partInfo[p].targetSize, s[p], partInfo[p].size, partInfo[p].evictProb, partGranularity, sizes[p], bestPart, (int)profNoCand.get());
 #endif
                 // for FS partitioning, it doesn't need smoothtransient since it is replacement policy-based scheme
                 partInfo[p].targetSize = s[p];
