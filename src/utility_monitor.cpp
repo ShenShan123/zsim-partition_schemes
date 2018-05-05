@@ -29,6 +29,7 @@
 using namespace std;
 #define DEBUG_UMON 0
 //#define DEBUG_UMON 1
+bool StartDump = false;
 
 UMon::UMon(uint32_t _bankSets, uint32_t _umonLines, uint32_t _buckets) {
     umonLines = _umonLines;
@@ -267,11 +268,12 @@ ReuseDistSampler::ReuseDistSampler(HashFamily* _hf, uint32_t _bankSets, uint32_t
     }
 
     //hf = new H3HashFamily(2, 32, 0xF000BAAD);
-    rdv = new Histogram<uint32_t>(_buckets);
-    rdvSize = rdv->getSize();
+    //rdv = new Histogram<uint32_t>(_buckets);
+    //rdvSize = rdv->getSize();
+    rdvSize = _buckets;
 
-    info("ReuseDistSampler, sampling rate 1/%d, number of sampler sets %d, max RD %d, RDV buckets: %d, sampling window size %d", 
-        dssRate, samplerSets, _max, rdv->getSize(), _window);
+    info("ReuseDistSampler: sampling rate 1/%d, # of sampler sets %d, max RD %d, buckets: %d, sampling window %d", 
+        dssRate, samplerSets, _max, rdv.size(), _window);
 }
 
 ReuseDistSampler::~ReuseDistSampler() 
@@ -282,8 +284,16 @@ ReuseDistSampler::~ReuseDistSampler()
         gm_free(sampleCntrs);
         gm_free(residuals);
     }
-    delete rdv;
+    //delete rdv;
 };
+
+
+void ReuseDistSampler::initStats(AggregateStat* parentStat) {
+    AggregateStat* rdSamplerStat = new AggregateStat();
+    rdSamplerStat->init("rdSamplerStat", "reuse distance sampler stats");
+    rdv.init("rdd", "reuse distance distribution", rdvSize); rdSamplerStat->append(&rdv);
+    parentStat->append(rdSamplerStat);
+}
 
 /*
 // delete the old entry wholse RD is larger than maxRd 
@@ -313,8 +323,13 @@ uint32_t ReuseDistSampler::cleanOldEntry()
     return maxNum;
 }*/
 
-void ReuseDistSampler::access(uint64_t addr)
+void ReuseDistSampler::access(Address addr)
 {
+    if (unlikely(StartDump)) { // check the dump flag
+        clear();
+        StartDump = false;
+    }
+
     uint32_t set = getSet(addr);
     // do we sample this line? if not, just return
     if (set & (dssRate - 1))
@@ -329,18 +344,14 @@ void ReuseDistSampler::access(uint64_t addr)
 
     if (pos != addrMap.end()) {
         uint32_t rd = index - pos->second - 1; 
-        //info("rd = %d", rd);
+        // if the rd larger than the truncation, we limite the maximum RD to maxRd
+        rd = DOLOG(rd > maxRd ? maxRd : rd) / step;
+        assert(rd < rdv.size());
+        // the first step rds account for the increment of rdv[0], the second ones for the increment of rdv[1], and so on
+        rdv.inc(rd);
         // for the sampling scheme, rd-counter is clear when finish rd calculation
         if (sampleWindow)
             addrMap.erase(pos);
-        // if the rd larger than the truncation, we limite the maximum RD to maxRd
-        if (rd >= maxRd) {
-            //cleanOldEntry(rdv);
-            rdv->sample(DOLOG(maxRd) / step); // the first step rds account for the increment of rdv[0], the second ones for the increment of rdv[1], and so on
-        }
-        // else we don't need to traverse the addrMap 
-        else
-            rdv->sample(DOLOG(rd) / step);
     }
 
     // for sampline scheme 
@@ -369,8 +380,8 @@ void ReuseDistSampler::access(uint64_t addr)
 void ReuseDistSampler::clear() {
     info("cleaning, addrMap size: %d", (int)addrMap.size());
     addrMap.clear(); 
-    rdv->print();
-    rdv->clear();
+    //rdv->print();
+    //rdv->clear();
 
     for (uint32_t i = 0; i < samplerSets; ++i) {
         indices[i] = 0;

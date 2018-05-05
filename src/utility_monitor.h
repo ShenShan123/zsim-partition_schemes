@@ -38,6 +38,8 @@
 #define UMON_INFO 1
 //#define UMON_INFO 1
 
+extern bool StartDump; // the dump flag, add by shen
+
 //class HashFamily;
 
 class UMon : public GlobAlloc {
@@ -170,7 +172,7 @@ class ReuseDistSampler : public GlobAlloc
         uint32_t samplerSets;
         uint32_t bankSets;
         MTRand rng;
-        Histogram<uint32_t>* rdv; // the maxRd + 1 should be multiple of RDV size, so that the rdv can be filled up by all RDs
+        VectorCounter rdv; // the maxRd + 1 should be multiple of RDV size, so that the rdv can be filled up by all RDs
         uint32_t rdvSize;
         //Used in masks for set indices and sampling factor descisions
         HashFamily* hf; // we calculate the RD for each set, so the hash function using in cache array is needed
@@ -179,13 +181,15 @@ class ReuseDistSampler : public GlobAlloc
     
         ~ReuseDistSampler();
 
+        void initStats(AggregateStat* parentStat);
+
         inline const uint32_t getSet(uint64_t addr) { return hf->hash(0, addr) & (bankSets - 1); }
     
         uint32_t cleanOldEntry();
     
         //uint32_t mapMaxSize() { return maxsize; }
     
-        void access(uint64_t addr);
+        void access(Address addr);
     
         void print();
 
@@ -193,7 +197,7 @@ class ReuseDistSampler : public GlobAlloc
 
         uint32_t getStep() const { return step; }
 
-        inline const uint32_t getRdvBin(uint32_t b) { return rdv->getValue(b); }
+        inline const uint32_t getRdvBin(uint32_t b) { return rdv.count(b); }
         const uint32_t getRdvSize() { return rdvSize; }
 };
 

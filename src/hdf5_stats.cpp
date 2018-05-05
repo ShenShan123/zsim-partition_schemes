@@ -33,6 +33,7 @@
 #include "stats.h"
 #include "zsim.h"
 
+extern bool StartDump;
 /** Implements the HDF5 backend. Creates one big table in the file, and writes one row per dump.
  * NOTE: Because dump may be called from multiple processes, we close and open the HDF5 file every dump.
  * This is inefficient, but dumps are not that common anyhow, and we get the ability to read hdf5 files mid-simulation.
@@ -51,6 +52,7 @@ class HDF5BackendImpl : public GlobAlloc {
         uint32_t recordsPerWrite; //how many records to buffer; determines chunk size as well
 
         uint32_t bufferedRecords; //number of records buffered (dumped w/o being written), <= recordsPerWrite
+        uint64_t intervals; // added by shen
 
         // Always have a single function to determine when to skip a stat to avoid inconsistencies in the code
         bool skipStat(Stat* s) {
@@ -221,6 +223,7 @@ class HDF5BackendImpl : public GlobAlloc {
 
             info("HDF5 backend: Created table, %ld bytes/record, %d records/write", recordSize, recordsPerWrite);
             H5Fclose(fileID);
+            intervals = 0;
         }
 
         ~HDF5BackendImpl() {}
@@ -244,8 +247,9 @@ class HDF5BackendImpl : public GlobAlloc {
                 //Rewind
                 bufferedRecords = 0;
                 curPtr = dataBuf;
-                //startDump = true;
-                info("====== hdf5 dumping ======");
+                StartDump = true; // stats dumping!! by shen
+                intervals++;
+                info("====== hdf5 dumping, interval: %ld ======", intervals);
             }
         }
 };

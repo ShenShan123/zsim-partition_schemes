@@ -414,7 +414,4 @@ class HDF5Backend : public StatsBackend {
         virtual void dump(bool buffered);
 };
 
-// the dump flag, add by shen
-//bool startDump;
-
 #endif  // STATS_H_

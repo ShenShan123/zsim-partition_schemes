@@ -29,19 +29,27 @@
 
 /* Set-associative array implementation */
 
-SetAssocArray::SetAssocArray(uint32_t _numLines, uint32_t _assoc, ReplPolicy* _rp, HashFamily* _hf) : rp(_rp), hf(_hf), numLines(_numLines), assoc(_assoc)  {
+SetAssocArray::SetAssocArray(uint32_t _numLines, uint32_t _assoc, ReplPolicy* _rp, HashFamily* _hf, ReuseDistSampler* _sampler) 
+: rp(_rp), hf(_hf), rds(_sampler), numLines(_numLines), assoc(_assoc)  
+{
     array = gm_calloc<Address>(numLines);
     numSets = numLines/assoc;
     setMask = numSets - 1;
+    lifeCntr = gm_calloc<uint64_t>(numLines); // add by shen
+    setInsertCntr = gm_calloc<uint64_t>(numSets); // add by shen
     assert_msg(isPow2(numSets), "must have a power of 2 # sets, but you specified %d", numSets);
 }
 
 int32_t SetAssocArray::lookup(const Address lineAddr, const MemReq* req, bool updateReplacement) {
+    if (rds != nullptr) rds->access(lineAddr); // monitor RD distribution, by shen
+    
     uint32_t set = hf->hash(0, lineAddr) & setMask;
     //info("entering lookup");
     uint32_t first = set*assoc;
     for (uint32_t id = first; id < first + assoc; id++) {
         if (array[id] ==  lineAddr) {
+            uint64_t life = setInsertCntr[set] - lifeCntr[id]; // calculate the lifetime of this line
+            lifeHitDistr.inc(life >= rdBuckets ? rdBuckets - 1 : life);
             if (updateReplacement) rp->hitUpdate(id, req); // this function only works differently from update() in RRIP repl policy, sxj
             //if (updateReplacement) rp->update(id, req);
             return id;
@@ -55,6 +63,13 @@ uint32_t SetAssocArray::preinsert(const Address lineAddr, const MemReq* req, Add
     uint32_t first = set*assoc;
 
     uint32_t candidate = rp->rankCands(req, SetAssocCands(first, first+assoc));
+   
+   // record the lifetime distribution, added by shen
+    ++setInsertCntr[set]; 
+    uint64_t life = setInsertCntr[set] - lifeCntr[candidate]; // calculate the lifetime of this line
+    lifeDistr.inc(life >= rdBuckets ? rdBuckets - 1 : life);
+    lifeCntr[candidate] = setInsertCntr[set]; // new line has a new counter num
+    // done, by shen
 
     if (candidate != numLines) // if no candidate is found, add by shen
         *wbLineAddr = array[candidate];
@@ -67,6 +82,16 @@ void SetAssocArray::postinsert(const Address lineAddr, const MemReq* req, uint32
     rp->update(candidate, req);
 }
 
+void SetAssocArray::initStats(AggregateStat* parentStat) {
+    AggregateStat* arrayStats = new AggregateStat();
+    arrayStats->init("arrayStats", "set associative array stats");
+    rdBuckets = rds->getRdvSize();
+    lifeDistr.init("lifeD", "lifetime distribution", rdBuckets); arrayStats->append(&lifeDistr);
+    lifeHitDistr.init("lifeHitD", "lifetime distribution accounting for hits", rdBuckets); arrayStats->append(&lifeHitDistr);
+    parentStat->append(arrayStats);
+    // init the rdd stats, by shen
+    if (rds != nullptr) rds->initStats(parentStat);
+}
 
 /* ZCache implementation */
 

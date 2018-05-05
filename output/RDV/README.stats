@@ -18,19 +18,14 @@ f = h5py.File('zsim.h5', 'r')
 
 # Get the single dataset in the file
 dset = f["stats"]["root"]
-print len(dset)
-
-#p1 = dset[1]
-#p2 = dset[9];
-#print p1,p2;
-
+print "dset rows", len(dset)
 # Each dataset is first indexed by record. A record is a snapshot of all the
 # stats taken at a specific time.  All stats files have at least two records,
 # at beginning (dest[0])and end of simulation (dset[-1]).  Inside each record,
 # the format follows the structure of the simulated objects. A few examples:
 
 # Phase count at end of simulation
-endPhase = dset[-1]['phase']
+endPhase = dset[100]['rdSamplerStat']['rdd']
 print endPhase
 
 # If your L2 has a single bank, this is all the L2 hits. Otherwise it's the
@@ -44,7 +39,7 @@ print l2_hits
 
 # Total number of instructions executed, counted by adding per-core counts
 # (you could also look at procInstrs)
-totalInstrs = np.sum(dset[-1]['westmere']['instrs'])
+totalInstrs = np.sum(dset[-1]['simpleCore']['instrs'])
 print totalInstrs
 
 # You can also focus on one sample, or index over multiple steps, e.g.,

@@ -66,7 +66,6 @@ uint64_t Cache::access(MemReq& req) {
         bool updateReplacement = (req.type == GETS) || (req.type == GETX);
         //info("before lookup, lineAddr %lx, req type %d, req srcId %d, req childId %d, req statsptr %lx", req.lineAddr, req.type, req.srcId, req.childId, (uint64_t)req.state);
         int32_t lineId = array->lookup(req.lineAddr, &req, updateReplacement);
-        //int32_t lineId = array->lookup(0, nullptr, updateReplacement);
 
         respCycle += accLat;
 

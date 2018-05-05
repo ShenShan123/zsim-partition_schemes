@@ -167,6 +167,10 @@ BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, 
         uint32_t period = config.get<uint32_t>(prefix + "repl.period", 2 * 1024 * 1024);
         // PDP need reuse distance sampler
         ReuseDistSampler* rdSampler = new ReuseDistSampler(hf, numSets, samplerSets, buckets, maxRd, window);
+        //AggregateStat* rdSamplerStat = new AggregateStat(true);
+        //rdSamplerStat->init("rdSampler", "reuse distance sampler stats");
+        rdSampler->initStats(zinfo->rootStat);
+        //zinfo->rootStat->append(rdSamplerStat);
         if (arrayType != "SetAssoc") panic("PDP replacement requires SetAssoc array");
         rp = new PDPReplPolicy(numLines, ways, rdSampler, distance, nonInclusiveHack, period);
     } else if (replType == "LFU") {
@@ -280,7 +284,14 @@ BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, 
     //Alright, build the array
     CacheArray* array = nullptr;
     if (arrayType == "SetAssoc") {
-        array = new SetAssocArray(numLines, ways, rp, hf);
+        // This configuration doesn't sample address, by shen
+        uint32_t samplerSets = config.get<uint32_t>(prefix + "repl.samplerSets", numSets);
+        uint32_t buckets = config.get<uint32_t>(prefix + "repl.buckets", 512);
+        uint32_t maxRd = config.get<uint32_t>(prefix + "repl.maxRd", 511);
+        uint32_t window = config.get<uint32_t>(prefix + "repl.window", 0);
+        ReuseDistSampler* rds = new ReuseDistSampler(hf, numSets, samplerSets, buckets, maxRd, window);
+        array = new SetAssocArray(numLines, ways, rp, hf, rds);
+        //array = new SetAssocArray(numLines, ways, rp, hf);
     } else if (arrayType == "Z") {
         array = new ZArray(numLines, ways, candidates, rp, hf);
     } else if (arrayType == "IdealLRU") {
