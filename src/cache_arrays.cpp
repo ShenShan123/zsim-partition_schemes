@@ -50,9 +50,9 @@ int32_t SetAssocArray::lookup(const Address lineAddr, const MemReq* req, bool up
     for (uint32_t id = first; id < first + assoc; id++) {
         if (array[id] == lineAddr) {
             numHits.inc();
-            // if the rd is -1: the address induces a cold miss; the address is not sampled
+            // if the rd is -1: the address induces a cold miss; the address is not sampled, by shen
             if (rds != nullptr) hitDistr.inc(rd == -1 ? rdBuckets - 1 : rd);
-            
+
             if (updateReplacement) rp->hitUpdate(id, req); // this function only works differently from update() in RRIP & PDP repl policy, sxj
             //if (updateReplacement) rp->update(id, req);
             return id;
