@@ -284,13 +284,20 @@ BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, 
     //Alright, build the array
     CacheArray* array = nullptr;
     if (arrayType == "SetAssoc") {
-        // This configuration doesn't sample address, by shen
-        uint32_t samplerSets = config.get<uint32_t>(prefix + "repl.samplerSets", numSets);
-        uint32_t buckets = config.get<uint32_t>(prefix + "repl.buckets", 512);
-        uint32_t maxRd = config.get<uint32_t>(prefix + "repl.maxRd", 511);
-        uint32_t window = config.get<uint32_t>(prefix + "repl.window", 0);
-        ReuseDistSampler* rds = new ReuseDistSampler(hf, numSets, samplerSets, buckets, maxRd, window);
+        // This configuration doesn't sample addresses, by shen
+        bool useSampler = config.get<bool>(prefix + "array.useSampler", false);
+        ReuseDistSampler* rds = nullptr;
+        if (useSampler) {
+            // do we sample a fully-assoc RDD ?
+            bool fullyAssoc = config.get<bool>(prefix + "array.fullyAssoc", false);
+            uint32_t samplerSets = fullyAssoc ? 1 : config.get<uint32_t>(prefix + "array.samplerSets", numSets);
+            uint32_t buckets = config.get<uint32_t>(prefix + "array.buckets", 512);
+            uint32_t maxRd = config.get<uint32_t>(prefix + "array.maxRd", 511);
+            uint32_t window = config.get<uint32_t>(prefix + "array.window", 0);
+            rds = new ReuseDistSampler(hf, fullyAssoc ? 1 : numSets, samplerSets, buckets, maxRd, window);
+        }
         array = new SetAssocArray(numLines, ways, rp, hf, rds);
+        // end, by shen
         //array = new SetAssocArray(numLines, ways, rp, hf);
     } else if (arrayType == "Z") {
         array = new ZArray(numLines, ways, candidates, rp, hf);
@@ -348,11 +355,10 @@ BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, 
         cache = new FilterCache(numSets, numLines, cc, array, rp, accLat, invLat, name);
     }
 
-#if 0
-    info("Built L%d bank, %d bytes, %d lines, %d ways (%d candidates if array is Z), %s array, %s hash, %s replacement, accLat %d, invLat %d name %s",
-            level, bankSize, numLines, ways, candidates, arrayType.c_str(), hashType.c_str(), replType.c_str(), accLat, invLat, name.c_str());
+#if 1
+    info("bank, %d bytes, %d lines, %d ways (%d candidates if array is Z), %s array, %s hash, %s replacement, accLat %d, invLat %d name %s",
+            bankSize, numLines, ways, candidates, arrayType.c_str(), hashType.c_str(), replType.c_str(), accLat, invLat, name.c_str());
 #endif
-
     return cache;
 }
 
@@ -473,6 +479,8 @@ CacheGroup* BuildCacheGroup(Config& config, const string& name, bool isTerminal)
             cg[i][j] = BuildCacheBank(config, prefix, bankName, bankSize, isTerminal, domain);
         }
     }
+
+    info("bank size %d, # of banks %d, # of caches %d", size, banks, caches);
 
     return cgp;
 }

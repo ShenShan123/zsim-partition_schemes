@@ -62,17 +62,15 @@ class SetAssocArray : public CacheArray {
         Address* array;
         ReplPolicy* rp;
         HashFamily* hf;
-        ReuseDistSampler* rds;
         uint32_t numLines;
         uint32_t numSets;
         uint32_t assoc;
         uint32_t setMask;
         // added by shen
-        uint64_t* lifeCntr;
-        uint64_t* setInsertCntr;
-        VectorCounter lifeDistr;
-        VectorCounter lifeHitDistr;
+        ReuseDistSampler* rds;
+        VectorCounter hitDistr;
         uint32_t rdBuckets;
+        Counter numHits;
         // added end
 
     public:

@@ -83,59 +83,6 @@ class UMon : public GlobAlloc {
         uint32_t getBuckets() const { return buckets; }
 };
 
-/* for recording distribution into a Histogram, 
-   Accur is the accuracy of transforming calculation, by shen */
-template <class B = uint32_t>
-class Histogram : public GlobAlloc
-{
-    protected:
-        B * bins;
-        B samples;
-        int size;
-
-    public:
-        Histogram() : bins(nullptr), samples(0), size(0) {};
-    
-        Histogram(int s);
-    
-        Histogram(const Histogram<B> & rhs);
-    
-        ~Histogram();
-    
-        void setSize(int s);
-    
-        const int getSize();
-    
-        void clear();
-    
-        void normalize();
-    
-        B & operator[] (const int idx) const;
-    
-        Histogram<B> & operator=(const Histogram<B> & rhs);
-    
-        Histogram<B> & operator+=(const Histogram<B> & rhs);
-    
-        inline void sample(int x, uint16_t n = 1)
-        {
-            /* the sample number must less than max size of bins */
-            assert(x < size && x >= 0);
-            bins[x] += n;
-            /* calculate the total num of sampling */
-            samples += n;
-        };
-    
-        const B getSamples() const { return samples; }; 
-    
-        //void print(std::ofstream & file);
-        void print();
-
-        inline B getValue(int i) const {
-            assert(i < size && i >= 0);
-            return bins[i];
-        }
-};
-
 /* calculate log2(s) + 1 */
 template<class T>
 inline T log2p1(T s)
@@ -189,7 +136,7 @@ class ReuseDistSampler : public GlobAlloc
     
         //uint32_t mapMaxSize() { return maxsize; }
     
-        void access(Address addr);
+        int32_t access(Address addr);
     
         void print();
 

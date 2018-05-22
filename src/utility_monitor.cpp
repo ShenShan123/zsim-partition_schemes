@@ -143,114 +143,6 @@ void UMon::startNextInterval() {
     }
 }
 
-// ==================== Histogram class ====================, by shen
-
-template <class B>
-Histogram<B>::Histogram(int _s) : samples(0), size(_s)
-{
-    bins = gm_calloc<B>(size);
-    /* init bins to 0 */
-    for (int i = 0; i < size; ++i)
-        bins[i] = 0;
-}
-
-template <class B>
-Histogram<B>::Histogram(const Histogram<B> & rhs) : samples(rhs.samples), size(rhs.size)
-{
-    bins = new B[size];
-
-    for (int i = 0; i < size; ++i)
-        bins[i] = rhs.bins[i];
-}
-
-template <class B>
-Histogram<B>::~Histogram() { gm_free(bins); }
-
-template <class B>
-void Histogram<B>::setSize(int _s)
-{
-    if (bins != nullptr)
-        gm_free(bins);
-
-    size = _s;
-    bins = gm_calloc<B>(size);
-
-    /* init bins to 0 */
-    for (int i = 0; i < size; ++i)
-        bins[i] = 0;
-
-    //std::cout << "size of bins " << size << std::endl;
-}
-
-template <class B>
-const int Histogram<B>::getSize() { return size; }
-
-template <class B>
-void Histogram<B>::clear()
-{
-    samples = 0;
-    /* when clear bins, the size keeps unchanged */
-    for (int i = 0; i < size; ++i)
-        bins[i] = 0;
-}
-
-template <class B>
-void Histogram<B>::normalize()
-{
-    for (int i = 0; i < size; ++i)
-        bins[i] /= samples;
-}
-
-template <class B>
-B & Histogram<B>::operator[](const int idx) const
-{
-    assert(idx >= 0 && idx < size);
-    return bins[idx];
-}
-
-template <class B>
-Histogram<B> & Histogram<B>::operator=(const Histogram<B> & rhs)
-{
-    assert(size == rhs.size());
-
-    for (int i = 0; i < size; ++i)
-        bins[i] = rhs.bins[i];
-
-    samples = rhs.samples;
-    return *this;
-}
-
-template <class B>
-Histogram<B> & Histogram<B>::operator+=(const Histogram<B> & rhs)
-{
-    assert(size == rhs.size);
-
-    for (int i = 0; i < size; ++i)
-        bins[i] += rhs.bins[i];
-
-    samples += rhs.samples;
-    return *this;
-}
-
-/*
-template <class B>
-void Histogram<B>::sample(int x, uint16_t n)
-{
-    // the sample number must less than max size of bins
-    assert(x < size && x >= 0);
-    bins[x] += n;
-    // calculate the total num of sampling
-    samples += n;
-}
-*/
-template <class B>
-void Histogram<B>::print()
-//void Histogram<B>::print(std::ofstream & file)
-{
-    // just for test
-    info("RDV print: [0] %d, [%d] %d, total samples: %d", bins[0], size - 1, bins[size-1], samples);
-}
-
 // ==================== ReuseDistSampler class ====================, implemented by shen
 ReuseDistSampler::ReuseDistSampler(HashFamily* _hf, uint32_t _bankSets, uint32_t _samplerSets, uint32_t _buckets, uint32_t _max, uint32_t _window) 
     : indices(nullptr), intervalLength(_max), sampleWindow(_window), step((_max + 1) / _buckets), sampleCntrs(nullptr), residuals(nullptr), maxRd(_max),
@@ -266,14 +158,11 @@ ReuseDistSampler::ReuseDistSampler(HashFamily* _hf, uint32_t _bankSets, uint32_t
         sampleCntrs = gm_calloc<uint32_t>(samplerSets); // for the index counters
         residuals = gm_calloc<uint32_t>(samplerSets); // for the index counters
     }
-
-    //hf = new H3HashFamily(2, 32, 0xF000BAAD);
-    //rdv = new Histogram<uint32_t>(_buckets);
-    //rdvSize = rdv->getSize();
+    
     rdvSize = _buckets;
 
     info("ReuseDistSampler: sampling rate 1/%d, # of sampler sets %d, max RD %d, buckets: %d, sampling window %d", 
-        dssRate, samplerSets, _max, rdv.size(), _window);
+        dssRate, samplerSets, _max, rdvSize, _window);
 }
 
 ReuseDistSampler::~ReuseDistSampler() 
@@ -323,17 +212,17 @@ uint32_t ReuseDistSampler::cleanOldEntry()
     return maxNum;
 }*/
 
-void ReuseDistSampler::access(Address addr)
+int32_t ReuseDistSampler::access(Address addr)
 {
     if (unlikely(StartDump)) { // check the dump flag
         clear();
         StartDump = false;
     }
 
-    uint32_t set = getSet(addr);
+    uint32_t set = bankSets == 1 ? 0 : getSet(addr); // when the cache is fully associative, set index = 0.
     // do we sample this line? if not, just return
     if (set & (dssRate - 1))
-        return;
+        return -1;
 
     uint32_t ss = set / dssRate; // ss is the sampler set index
     assert(ss < samplerSets);
@@ -341,12 +230,13 @@ void ReuseDistSampler::access(Address addr)
     uint32_t & index = ++indices[ss];
 
     auto pos = addrMap.find(addr);
+    int32_t rd = -1;
 
     if (pos != addrMap.end()) {
-        uint32_t rd = index - pos->second - 1; 
+        rd = index - pos->second - 1; 
         // if the rd larger than the truncation, we limite the maximum RD to maxRd
-        rd = DOLOG(rd > maxRd ? maxRd : rd) / step;
-        assert(rd < rdv.size());
+        rd = DOLOG(rd > (int32_t)maxRd ? maxRd : rd) / step;
+        assert(rd < (int32_t)rdv.size());
         // the first step rds account for the increment of rdv[0], the second ones for the increment of rdv[1], and so on
         rdv.inc(rd);
         // for the sampling scheme, rd-counter is clear when finish rd calculation
@@ -355,9 +245,8 @@ void ReuseDistSampler::access(Address addr)
     }
 
     // for sampline scheme 
-    if (sampleWindow && sampleCntrs[ss]) {
+    if (sampleWindow && sampleCntrs[ss])
         --sampleCntrs[ss];
-    }
     // when sampleCntr is zero in sampling scheme, we sample an address to calculate rd.
     else if (sampleWindow) {
         // ensure no same address is existing in addrMap 
@@ -371,17 +260,16 @@ void ReuseDistSampler::access(Address addr)
         addrMap[addr] = index; 
     }
     // for non-sampling scheme 
-    else {
+    else 
         addrMap[addr] = index;
-    }
+    
     //info("access rd sampler, size: %d, rdv samples: %d", (int)addrMap.size(), rdv->getSamples());
+    return rd;
 }
 
 void ReuseDistSampler::clear() {
     info("cleaning, addrMap size: %d", (int)addrMap.size());
     addrMap.clear(); 
-    //rdv->print();
-    //rdv->clear();
 
     for (uint32_t i = 0; i < samplerSets; ++i) {
         indices[i] = 0;
