@@ -75,6 +75,9 @@ uint64_t Cache::access(MemReq& req) {
             lineId = array->preinsert(req.lineAddr, &req, &wbLineAddr); //find the lineId to replace
             trace(Cache, "[%s] Evicting 0x%lx", name.c_str(), wbLineAddr);
 
+            /*info("Cache [%s] access not found, lineAddr %ld, lineId %d childId %d, srcId %d,  reqState %s, type %s", // by shen
+                name.c_str(), req.lineAddr, lineId, req.childId, req.srcId, MESIStateName(*req.state), AccessTypeName(req.type)); */
+
             // if no candidate is found to evict (i.e. lineId == numLines), just bypass. this is the situation where PDP replacement policy bypass this access, by shen
             if (lineId != (int32_t)numLines) { 
                 //Evictions are not in the critical path in any sane implementation -- we do not include their delays
@@ -83,7 +86,7 @@ uint64_t Cache::access(MemReq& req) {
     
                 array->postinsert(req.lineAddr, &req, lineId); //do the actual insertion. NOTE: Now we must split insert into a 2-phase thing because cc unlocks us.
             } //else lineId = -1;
-        }
+        } 
         // Enforce single-record invariant: Writeback access may have a timing
         // record. If so, read it.
         EventRecorder* evRec = zinfo->eventRecorders[req.srcId];

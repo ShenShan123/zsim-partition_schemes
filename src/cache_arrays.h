@@ -68,9 +68,11 @@ class SetAssocArray : public CacheArray {
         uint32_t setMask;
         // added by shen
         ReuseDistSampler* rds;
+        VectorCounter rHitDistr;
         VectorCounter hitDistr;
-        uint32_t rdBuckets;
-        Counter numHits;
+        VectorCounter ageDistr;
+        uint32_t* arrayAges;
+        uint32_t maxDim;
         // added end
 
     public:

@@ -35,29 +35,43 @@ SetAssocArray::SetAssocArray(uint32_t _numLines, uint32_t _assoc, ReplPolicy* _r
     array = gm_calloc<Address>(numLines);
     numSets = numLines/assoc;
     setMask = numSets - 1;
-    //lifeCntr = gm_calloc<uint64_t>(numLines); // add by shen
-    //setInsertCntr = gm_calloc<uint64_t>(numSets); // add by shen
+    // record the lines' ages,  by shen
+    arrayAges = gm_calloc<uint32_t>(numLines); 
+    for (uint32_t i = 0; i < numLines; ++i) arrayAges[i] = 512; // should be larger than maxDim!
+    // end, by shen
     assert_msg(isPow2(numSets), "must have a power of 2 # sets, but you specified %d", numSets);
-    info("constructing SetAssocArray");
 }
 
 int32_t SetAssocArray::lookup(const Address lineAddr, const MemReq* req, bool updateReplacement) {
-    int32_t rd = -1;
+    uint32_t rd = 0;
     if (rds != nullptr) rd = rds->access(lineAddr); // monitor RD distribution, by shen
     
     uint32_t set = hf->hash(0, lineAddr) & setMask;
     uint32_t first = set * assoc;
+
+    // every lines in this set increment their ages, by shen
+    for (uint32_t id = first; id < first + assoc; id++) {
+        ++arrayAges[id];
+    }
+    // end, by shen
+
     for (uint32_t id = first; id < first + assoc; id++) {
         if (array[id] == lineAddr) {
-            numHits.inc();
-            // if the rd is -1: the address induces a cold miss; the address is not sampled, by shen
-            if (rds != nullptr) hitDistr.inc(rd == -1 ? rdBuckets - 1 : rd);
+            // hits distibution across all RDs, by shen
+            if (rds != nullptr) {
+                rHitDistr.inc(rd); // hit distribution on RDs
+                uint32_t age = arrayAges[id] > maxDim ? maxDim - 1 : arrayAges[id] - 1;
+                hitDistr.inc(age); // hit distribution on Ages
+                ageDistr.inc(age);
+            }
+            arrayAges[id] = 0;
 
             if (updateReplacement) rp->hitUpdate(id, req); // this function only works differently from update() in RRIP & PDP repl policy, sxj
             //if (updateReplacement) rp->update(id, req);
             return id;
         }
     }
+    rd++;
     return -1;
 }
 
@@ -75,6 +89,13 @@ uint32_t SetAssocArray::preinsert(const Address lineAddr, const MemReq* req, Add
 void SetAssocArray::postinsert(const Address lineAddr, const MemReq* req, uint32_t candidate) {
     rp->replaced(candidate);
     array[candidate] = lineAddr;
+    
+    if (rds != nullptr)  {
+        uint32_t age = arrayAges[candidate] > maxDim ? maxDim - 1 : arrayAges[candidate] - 1;
+        ageDistr.inc(age); // if the line is evicted, its age is record to ageDistr, by shen
+    }
+    
+    arrayAges[candidate] = 0; // a new age, by shen
     rp->update(candidate, req);
 }
 
@@ -82,16 +103,17 @@ void SetAssocArray::initStats(AggregateStat* parentStat) {
     AggregateStat* arrayStats = new AggregateStat();
     arrayStats->init("arrayStats", "set associative array stats");
     // init the hit distribution with RDs, by shen
+    // init the rdd stats, by shen
     if (rds != nullptr) {
-        rdBuckets = rds->getRdvSize();
-        hitDistr.init("hitDistr", "hits distribution at different RDs", rdBuckets); 
-        arrayStats->append(&hitDistr);
+        assert(rds->getRdvSize());
+        ageDistr.init("ageDistr", "age distribution", rds->getRdvSize()); arrayStats->append(&ageDistr);
+        rHitDistr.init("rHitDistr", "hits distribution at different RDs", rds->getRdvSize()); arrayStats->append(&rHitDistr);
+        hitDistr.init("hitDistr", "hits distribution at different ages", rds->getRdvSize()); arrayStats->append(&hitDistr);
+        maxDim = hitDistr.size();
+        rds->initStats(parentStat);
     }
 
-    numHits.init("numHits", "number of hits"); arrayStats->append(&numHits);
     parentStat->append(arrayStats);
-    // init the rdd stats, by shen
-    if (rds != nullptr) rds->initStats(parentStat);
 }
 
 /* ZCache implementation */

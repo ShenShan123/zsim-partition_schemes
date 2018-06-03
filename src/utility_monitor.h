@@ -114,7 +114,7 @@ class ReuseDistSampler : public GlobAlloc
         uint32_t step; // step counter, Sc in the PDP peper
         uint32_t* sampleCntrs;
         uint32_t* residuals;
-        uint32_t maxRd; // it should be 2^n - 1, all rds range in [0, maxRd]
+        uint32_t maxRd; // it should be 2^n - 1, all RDs range in [0, maxRd]
         uint32_t dssRate; // we sample one set every "dssRate" sets, must be 2^n
         uint32_t samplerSets;
         uint32_t bankSets;
@@ -136,7 +136,7 @@ class ReuseDistSampler : public GlobAlloc
     
         //uint32_t mapMaxSize() { return maxsize; }
     
-        int32_t access(Address addr);
+        uint32_t access(Address addr);
     
         void print();
 

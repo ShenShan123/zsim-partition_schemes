@@ -348,6 +348,8 @@ class MESICC : public CC {
         }
 
         uint64_t processAccess(const MemReq& req, int32_t lineId, uint64_t startCycle, uint64_t* getDoneCycle = nullptr) {
+            /*info("CC access, lineAddr %ld, lineId %d childId %d, srcId %d,  reqState %s, type %s", // by shen
+                req.lineAddr, lineId, req.childId, req.srcId, MESIStateName(*req.state), AccessTypeName(req.type));*/
             uint64_t respCycle = startCycle;
             //Handle non-inclusive writebacks by bypassing
             //NOTE: Most of the time, these are due to evictions, so the line is not there. But the second condition can trigger in NUCA-initiated

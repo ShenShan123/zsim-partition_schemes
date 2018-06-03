@@ -356,8 +356,8 @@ BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, 
     }
 
 #if 1
-    info("bank, %d bytes, %d lines, %d ways (%d candidates if array is Z), %s array, %s hash, %s replacement, accLat %d, invLat %d name %s",
-            bankSize, numLines, ways, candidates, arrayType.c_str(), hashType.c_str(), replType.c_str(), accLat, invLat, name.c_str());
+    info("bank, %d bytes, %d lines, %d ways (%d candidates if array is Z), %s array, %s hash, %s replacement, %d no-inclusion, accLat %d, invLat %d name %s",
+            bankSize, numLines, ways, candidates, arrayType.c_str(), hashType.c_str(), replType.c_str(), nonInclusiveHack, accLat, invLat, name.c_str());
 #endif
     return cache;
 }

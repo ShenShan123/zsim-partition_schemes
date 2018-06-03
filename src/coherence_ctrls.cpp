@@ -78,7 +78,7 @@ uint64_t MESIBottomCC::processEviction(Address wbLineAddr, uint32_t lineId, bool
 
         default: panic("!?");
     }
-    assert_msg(*state == I, "Wrong final state %s on eviction", MESIStateName(*state));
+    assert_msg(*state == I, "Wrong final state %s on eviction, lineAddr %ld, lineId %d selfId %d srcId %d", MESIStateName(*state), wbLineAddr, lineId, selfId, srcId);
     return respCycle;
 }
 
@@ -86,6 +86,7 @@ uint64_t MESIBottomCC::processAccess(Address lineAddr, uint32_t lineId, AccessTy
     uint64_t respCycle = cycle;
 
     MESIState* state = &array[lineId];
+    //info("bcc access: lineAddr %ld, type %s, lineId %d, srcId %d, sate %s", lineAddr, AccessTypeName(type), lineId, srcId, MESIStateName(*state));
     switch (type) {
         // A PUTS/PUTX does nothing w.r.t. higher coherence levels --- it dies here
         case PUTS: //Clean writeback, nothing to do (except profiling)
@@ -205,7 +206,6 @@ void MESIBottomCC::processInval(Address lineAddr, uint32_t lineId, InvType type,
 uint64_t MESIBottomCC::processNonInclusiveWriteback(Address lineAddr, AccessType type, uint64_t cycle, MESIState* state, uint32_t srcId, uint32_t flags) {
     if (!nonInclusiveHack) panic("Non-inclusive %s on line 0x%lx, this cache should be inclusive", AccessTypeName(type), lineAddr);
 
-    //info("Non-inclusive wback, forwarding");
     MemReq req = {lineAddr, type, selfId, state, cycle, &ccLock, *state, srcId, flags | MemReq::NONINCLWB};
     uint64_t respCycle = parents[getParentId(lineAddr)]->access(req);
     return respCycle;
@@ -257,6 +257,8 @@ uint64_t MESITopCC::sendInvalidates(Address lineAddr, uint32_t lineId, InvType t
             assert(e->numSharers == 1);
             e->exclusive = false;
         }
+        if (lineId == 15009) info("Inva, lineId %d, srcId %d,  isExclusive %d numSharers %d", 
+                lineId, srcId, e->exclusive, e->numSharers);
     }
     return maxCycle;
 }
@@ -277,20 +279,37 @@ uint64_t MESITopCC::processAccess(Address lineAddr, uint32_t lineId, AccessType 
                                   MESIState* childState, bool* inducedWriteback, uint64_t cycle, uint32_t srcId, uint32_t flags) {
     Entry* e = &array[lineId];
     uint64_t respCycle = cycle;
+    /*info("tcc access: lineAddr %ld, type %s, lineId %d childId %d sharers %d, srcId %d,  childState %s, isExclusive %d numSharers %d",
+                lineAddr, AccessTypeName(type), lineId, childId, (int)e->sharers[childId], srcId, MESIStateName(*childState), e->exclusive, e->numSharers);*/
+    
+    // we modified this part of this routine for configring a nonInclusive L2 and nonInclusive L3 cache. Note the condition that the L2 do not have the copy of line in L1,
+    // as well as L3. So the L3 cache has no sharers of L2, thus we need to handle for the PUTX/PUTS otherwise the assertion will fail. by shen
     switch (type) {
-        case PUTX: // the dirty write back is from the child cache (lower level), by shen
-            assert(e->isExclusive());
-            if (flags & MemReq::PUTX_KEEPEXCL) {
+        case PUTX: // handle the dirty write back to upper level cache and change the child cache's state (lower level), by shen
+            assert_msg(/*e->isExclusive()*/ e->exclusive, "Wrong state for PUTX, address %ld, lineId %d childId %d sharers %d, srcId %d,  childState %s, isExclusive %d numSharers %d", 
+                lineAddr, lineId, childId, (int)e->sharers[childId], srcId, MESIStateName(*childState), e->exclusive, e->numSharers);
+            if ((flags & MemReq::PUTX_KEEPEXCL) && e->numSharers) { // if this and the child cache do not have the copy, the e->isExclusive() could fail an assert.
                 assert(e->sharers[childId]);
                 assert(*childState == M);
                 *childState = E; //they don't hold dirty data anymore
                 break; //don't remove from sharer set. It'll keep exclusive perms.
             }
+            else if ((flags & MemReq::PUTX_KEEPEXCL) && (e->numSharers == 0)) { // if the child level cache also has no copy, just do change the state of cacheline in L1 cache, by shen
+                assert(*childState == M);
+                *childState = E; //they don't hold dirty data anymore
+                break;                
+            }
+            else if (e->numSharers == 0) { // if the child level cache has no copy, just invalide the L1 cache
+                *childState = I;
+            }
             //note NO break in general
         case PUTS:// a clean write back from child cache indicate the line in lower cache has been evicted in exclusive cache. by shen
-            assert(e->sharers[childId]);
-            e->sharers[childId] = false;
-            e->numSharers--;
+            if (e->numSharers) { // if this line in this level does have any sharers...
+                assert_msg(e->sharers[childId], "Wrong state for PUTS, address %ld, lineId %d childId %d sharers %d, srcId %d,  childState %s, isExclusive %d numSharers %d", 
+                    lineAddr, lineId, childId, (int)e->sharers[childId], srcId, MESIStateName(*childState), e->exclusive, e->numSharers); // commented by shen
+                e->sharers[childId] = false;
+            } // if no sharers, it indicates the L2 is also nonInclusive, so just change state of the cacheline in L1
+            e->numSharers -= e->numSharers != 0; // modified by shen
             *childState = I;
             break;
         case GETS: // fetch a clean line by the child cache

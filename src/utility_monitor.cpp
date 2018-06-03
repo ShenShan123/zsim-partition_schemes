@@ -212,7 +212,7 @@ uint32_t ReuseDistSampler::cleanOldEntry()
     return maxNum;
 }*/
 
-int32_t ReuseDistSampler::access(Address addr)
+uint32_t ReuseDistSampler::access(Address addr)
 {
     if (unlikely(StartDump)) { // check the dump flag
         clear();
@@ -230,19 +230,24 @@ int32_t ReuseDistSampler::access(Address addr)
     uint32_t & index = ++indices[ss];
 
     auto pos = addrMap.find(addr);
-    int32_t rd = -1;
+    bool found = false;
+    uint32_t rd = DOLOG(maxRd) / step;
 
     if (pos != addrMap.end()) {
+        found = true;
         rd = index - pos->second - 1; 
         // if the rd larger than the truncation, we limite the maximum RD to maxRd
-        rd = DOLOG(rd > (int32_t)maxRd ? maxRd : rd) / step;
-        assert(rd < (int32_t)rdv.size());
+        rd = DOLOG(rd > maxRd ? maxRd : rd) / step;
+        assert(rd < rdv.size());
         // the first step rds account for the increment of rdv[0], the second ones for the increment of rdv[1], and so on
         rdv.inc(rd);
         // for the sampling scheme, rd-counter is clear when finish rd calculation
         if (sampleWindow)
             addrMap.erase(pos);
     }
+    /* we don't find this address indicate cold address, with RD = maxRd, in non-sampling scheme */
+    else if (!sampleWindow)
+        rdv.inc(rd);
 
     // for sampline scheme 
     if (sampleWindow && sampleCntrs[ss])
@@ -259,9 +264,11 @@ int32_t ReuseDistSampler::access(Address addr)
         // record the new sampled address and the index 
         addrMap[addr] = index; 
     }
-    // for non-sampling scheme 
-    else 
-        addrMap[addr] = index;
+    // for non-sampling scheme, update the index in this entry
+    else {
+        if (found) pos->second = index; // if we have found this address, we just use the iterator "pos" rather than traversing the tree.
+        else addrMap[addr] = index;
+    }
     
     //info("access rd sampler, size: %d, rdv samples: %d", (int)addrMap.size(), rdv->getSamples());
     return rd;

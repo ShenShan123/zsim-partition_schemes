@@ -15,57 +15,85 @@ import numpy as np
 
 # Open stats file
 f = h5py.File('zsim.h5', 'r')
+# the output files
+rddout = open("rdd.txt", "w")
+#ldout = open("ld.txt", "w")
+#lhdout = open("lhd.txt", "w")
+misout = open("miss.txt", "w")
 
 # Get the single dataset in the file
 dset = f["stats"]["root"]
-print "dset rows", len(dset)
+rows = len(dset)
+print "dset total number of rows", rows
 # Each dataset is first indexed by record. A record is a snapshot of all the
 # stats taken at a specific time.  All stats files have at least two records,
-# at beginning (dest[0])and end of simulation (dset[-1]).  Inside each record,
+# at beginning (dest[0])and end of simulation (dset[i]).  Inside each record,
 # the format follows the structure of the simulated objects. A few examples:
 
-# Phase count at end of simulation
-endPhase = dset[100]['rdSamplerStat']['rdd']
-print endPhase
+dims = len(dset[0]['l3']['rdSamplerStat']['rdd'][0])
+numBanks = len(dset[0]['l3']['rdSamplerStat']['rdd'])
+print "# of banks", numBanks, "; # of bins in histograms", dims
+# output the RDD in L3 cache
+print "output histograms..."
 
-# If your L2 has a single bank, this is all the L2 hits. Otherwise it's the
-# hits of the first L2 bank
-l2_0_hits = dset[-1]['l2'][0]['hGETS'] + dset[-1]['l2'][0]['hGETX']
-print l2_0_hits
+rdd = np.zeros((1, dims))
+ld = np.zeros((1, dims))
+lhd = np.zeros((1, dims))
+l3_hits = 0
+l3_accs = 0
+i = 99
+#for i in range(0,rows):
+rdd1 = np.sum(dset[i]['l3']['rdSamplerStat']['rdd'], axis = 0).reshape((1, dims))
+#	np.savetxt(rddout, rdd1, fmt="%d")
+i = -1
+rdd2 = np.sum(dset[i]['l3']['rdSamplerStat']['rdd'], axis = 0).reshape((1, dims))
+rdd = rdd2 - rdd1
+i = 99
+rhit1 = np.sum(dset[i]['l3']['arrayStats']['rHitDistr'], axis = 0).reshape((1, dims))
+i = -1
+rhit2 = np.sum(dset[i]['l3']['arrayStats']['rHitDistr'], axis = 0).reshape((1, dims))
+rhit = rhit2 - rhit1
+i = 99
+ad1 = np.sum(dset[i]['l3']['arrayStats']['ageDistr'], axis = 0).reshape((1, dims))
+i = -1
+ad2 = np.sum(dset[i]['l3']['arrayStats']['ageDistr'], axis = 0).reshape((1, dims))
+ad = ad2 - ad1
+i = 99
+lhd1 = np.sum(dset[i]['l3']['arrayStats']['hitDistr'], axis = 0).reshape((1, dims))
+i = -1
+lhd2 = np.sum(dset[i]['l3']['arrayStats']['hitDistr'], axis = 0).reshape((1, dims))
+lhd = lhd2 - lhd1
+#np.savetxt(rddout, rdd1, fmt="%d")
+#np.savetxt(rddout, rdd2, fmt="%d")
+np.savetxt(rddout, rdd, fmt="%d")
+np.savetxt(rddout, rhit, fmt="%d")
+np.savetxt(rddout, ad, fmt="%d")
+np.savetxt(rddout, lhd, fmt="%d")
+# Hits into all L3s
+i = 99
+l3_hits1 = np.sum(dset[i]['l3']['hGETS'] + dset[i]['l3']['hGETX'] + dset[i]['l3']['PUTS'] + dset[i]['l3']['PUTX'])
+l3_accs1 = np.sum(dset[i]['l3']['hGETS'] + dset[i]['l3']['hGETX'] + dset[i]['l3']['mGETS'] + dset[i]['l3']['mGETXIM'] + dset[i]['l3']['mGETXSM'] + dset[i]['l3']['PUTS'] + dset[i]['l3']['PUTX'])
+i = -1
+l3_hits2 = np.sum(dset[i]['l3']['hGETS'] + dset[i]['l3']['hGETX'] + dset[i]['l3']['PUTS'] + dset[i]['l3']['PUTX'])
+l3_accs2 = np.sum(dset[i]['l3']['hGETS'] + dset[i]['l3']['hGETX'] + dset[i]['l3']['mGETS'] + dset[i]['l3']['mGETXIM'] + dset[i]['l3']['mGETXSM'] + dset[i]['l3']['PUTS'] + dset[i]['l3']['PUTX'])
+l3_hits = l3_hits2 - l3_hits1
+l3_accs = l3_accs2 - l3_accs1
+l3_hit_accs = np.append(l3_hits, l3_accs).reshape((1, 2))
+np.savetxt(misout, l3_hit_accs, fmt="%d")
 
-# Hits into all L2s
-l2_hits = np.sum(dset[-1]['l2']['hGETS'] + dset[-1]['l2']['hGETX'])
-print l2_hits
+rddout.close()
+misout.close()
 
-# Total number of instructions executed, counted by adding per-core counts
-# (you could also look at procInstrs)
-totalInstrs = np.sum(dset[-1]['simpleCore']['instrs'])
-print totalInstrs
 
-# You can also focus on one sample, or index over multiple steps, e.g.,
-lastSample = dset[-1]
-allHitsS = lastSample['l2']['hGETS']
-firstL2HitsS = allHitsS[0]
-print firstL2HitsS
 
-# There is a certain slack in the positions of numeric and non-numeric indices,
-# so the following are equivalent:
-print dset[-1]['l2'][0]['hGETS'] 
-#print dset[-1][0]['l2']['hGETS'] # can't do
-print dset[-1]['l2']['hGETS'][0]
-print dset['l2']['hGETS'][-1,0]
-print dset['l2'][-1,0]['hGETS']
-print dset['l2']['hGETS'][-1,0]
-
-# However, you can't do things like dset[-1][0]['l2']['hGETS'], because the [0]
+# However, you can't do things like dset[i][0]['l2']['hGETS'], because the [0]
 # indexes a specific element in array 'l2'. The rule of thumb seems to be that
 # numeric indices can "flow up", i.e., you can index them later than you should.
 # This introduces no ambiguities.
 
 # Slicing works as in numpy, e.g.,
-print dset['l2']['hGETS'] # a 2D array with samples*per-cache data
-print dset['l2']['hGETS'][-1] # a 1D array with per-cache numbers, for the last sample
-print dset['l2']['hGETS'][:,0] # 1D array with all samples, for the first L2 cache
+#print dset['l2']['hGETS'] # a 2D array with samples*per-cache data
+#print dset['l2']['hGETS'][i] # a 1D array with per-cache numbers, for the last sample
+#print dset['l2']['hGETS'][:,0] # 1D array with all samples, for the first L2 cache
 
 # OK, now go bananas!
-
