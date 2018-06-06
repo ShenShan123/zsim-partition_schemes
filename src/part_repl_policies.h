@@ -224,7 +224,7 @@ class WayPartReplPolicy : public PartReplPolicy, public LegacyReplPolicy {
         void setPartitionSizes(const uint32_t* waysPart) {
             uint32_t curWay = 0;
             for (uint32_t p = 0; p < partitions; p++) {
-                partInfo[p].targetSize = totalSize*waysPart[p]/ways;
+                //partInfo[p].targetSize = totalSize*waysPart[p]/ways;
 #if UMON_INFO
                 info("part %d assigned %d ways", p, waysPart[p]);
 #endif
@@ -233,7 +233,7 @@ class WayPartReplPolicy : public PartReplPolicy, public LegacyReplPolicy {
 #if UMON_INFO
             for (uint32_t w = 0; w < ways; w++) info("wayPartIndex[%d] = %d", w, wayPartIndex[w]);
 #endif
-            assert(curWay == ways);
+            //assert(curWay == ways);
         }
 };
 

@@ -35,7 +35,6 @@
 #include "g_std/g_unordered_map.h"
 
 //Print some information regarding utility monitors and partitioning
-#define UMON_INFO 1
 //#define UMON_INFO 1
 
 extern bool StartDump; // the dump flag, add by shen

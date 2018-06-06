@@ -257,8 +257,7 @@ uint64_t MESITopCC::sendInvalidates(Address lineAddr, uint32_t lineId, InvType t
             assert(e->numSharers == 1);
             e->exclusive = false;
         }
-        if (lineId == 15009) info("Inva, lineId %d, srcId %d,  isExclusive %d numSharers %d", 
-                lineId, srcId, e->exclusive, e->numSharers);
+        assert(e->numSharers == e->sharers.count());
     }
     return maxCycle;
 }
@@ -304,12 +303,16 @@ uint64_t MESITopCC::processAccess(Address lineAddr, uint32_t lineId, AccessType 
             }
             //note NO break in general
         case PUTS:// a clean write back from child cache indicate the line in lower cache has been evicted in exclusive cache. by shen
-            if (e->numSharers) { // if this line in this level does have any sharers...
-                assert_msg(e->sharers[childId], "Wrong state for PUTS, address %ld, lineId %d childId %d sharers %d, srcId %d,  childState %s, isExclusive %d numSharers %d", 
-                    lineAddr, lineId, childId, (int)e->sharers[childId], srcId, MESIStateName(*childState), e->exclusive, e->numSharers); // commented by shen
+            if (e->numSharers && !e->sharers[childId]) { // if this line in this level does have any sharers, but not the current childId, just invalide the childState. by shen
+                /*assert_msg(e->sharers[childId], "Wrong state for PUTS, address %ld, lineId %d childId %d sharers %d, srcId %d,  childState %s, isExclusive %d numSharers %d %d", 
+                    lineAddr, lineId, childId, (int)e->sharers[childId], srcId, MESIStateName(*childState), e->exclusive, e->numSharers, (int)e->sharers.count());*/ // commented by shen
+                //e->sharers[childId] = false;
+            }
+            else if (e->numSharers && e->sharers[childId]) { // if this line has sharer and the sharer is this child cache, take it from the sharer list, by shen
                 e->sharers[childId] = false;
-            } // if no sharers, it indicates the L2 is also nonInclusive, so just change state of the cacheline in L1
-            e->numSharers -= e->numSharers != 0; // modified by shen
+                e->numSharers--;
+            }
+            // if no sharers, it indicates the L2 is also nonInclusive, so just change state of the cacheline in L1, by shen
             *childState = I;
             break;
         case GETS: // fetch a clean line by the child cache
@@ -361,6 +364,15 @@ uint64_t MESITopCC::processAccess(Address lineAddr, uint32_t lineId, AccessType 
 
         default: panic("!?");
     }
+
+    /*if ((e->numSharers && !e->sharers[childId]) || (e->numSharers != e->sharers.count())) {
+        for (uint32_t i = 0; i < e->sharers.size(); ++i)
+            info("sharer [%d] is shared? %d", i, (int)e->sharers[i]);
+        info("Something wrong in sharers, address %ld, lineId %d childId %d sharers %d, srcId %d,  childState %s, isExclusive %d numSharers %d %d, type %s", 
+                    lineAddr, lineId, childId, (int)e->sharers[childId], srcId, MESIStateName(*childState), e->exclusive, e->numSharers, (int)e->sharers.count(), AccessTypeName(type));
+        exit(1);
+    }*/
+
 
     return respCycle;
 }

@@ -112,8 +112,6 @@ void computeBestPartitioning(
     for (uint32_t i = 0; i < numPartitions; ++i) {
         tot += allocs[i];
     }
-
-    info("LookaheadPartitioner: total allocate part: %d", tot);
 }
 
 }  // namespace lookahead
@@ -135,6 +133,7 @@ LookaheadPartitioner::LookaheadPartitioner(PartReplPolicy* _repl, uint32_t _numP
 
 //allocs are in buckets
 void LookaheadPartitioner::partition() {
+    
     auto& monitor = *repl->getMonitor();
 
     uint32_t bestAllocs[numPartitions];
@@ -155,7 +154,7 @@ void LookaheadPartitioner::partition() {
 #if UMON_INFO
         info("LookaheadPartitioner: Switching allocation, new util %ld, old util %ld", newUtility, curUtility);
 #endif
-        std::copy(bestAllocs, bestAllocs+numPartitions, curAllocs);
+        //std::copy(bestAllocs, bestAllocs+numPartitions, curAllocs);
     } else {
 #if UMON_INFO
         info("LookaheadPartitioner: KEEPING allocation, new util %ld, old util %ld", newUtility, curUtility);
@@ -169,6 +168,7 @@ void LookaheadPartitioner::partition() {
 
     repl->setPartitionSizes(curAllocs);
     repl->getMonitor()->reset();
+
 }
 
 
