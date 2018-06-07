@@ -79,6 +79,7 @@ class WayPartReplPolicy : public PartReplPolicy, public LegacyReplPolicy {
         WayPartInfo* array;
 
         uint32_t* wayPartIndex; //stores partition of each way
+        uint32_t* candList;
 
         bool testMode;
 
@@ -104,7 +105,6 @@ class WayPartReplPolicy : public PartReplPolicy, public LegacyReplPolicy {
             partInfo = gm_calloc<PartInfo>(partitions);
             for (uint32_t i = 0; i < partitions; i++) {
                 partInfo[i].targetSize = 0;
-
                 //Need placement new, these object have vptr
                 new (&partInfo[i].profHits) Counter;
                 new (&partInfo[i].profMisses) Counter;
@@ -113,9 +113,9 @@ class WayPartReplPolicy : public PartReplPolicy, public LegacyReplPolicy {
             }
 
             array = gm_calloc<WayPartInfo>(totalSize); //all have ts, p == 0...
-            partInfo[0].size = totalSize; // so partition 0 has all the lines
-
             wayPartIndex = gm_calloc<uint32_t>(ways);
+            candList = gm_calloc<uint32_t>(ways); // strict way partition, by shen
+
             for (uint32_t w = 0; w < ways; w++) {
                 //Do initial way assignment, partitioner has no profiling info yet
                 uint32_t p = w*partitions/ways; // in [0, ..., partitions-1] // if partition number > ways, then some of the cores cannot have their own parts.
@@ -123,9 +123,19 @@ class WayPartReplPolicy : public PartReplPolicy, public LegacyReplPolicy {
                 partInfo[p].targetSize += waySize;
             }
 
+            // strict way partition, by shen
+            for (uint32_t i = 0; i < totalSize; ++i) {
+                uint32_t way = i % ways;
+                array[i].p = wayPartIndex[way];
+                partInfo[wayPartIndex[way]].size++;
+            }
+
+            //partInfo[0].size = totalSize; // so partition 0 has all the lines
+            // end, strict way partition, by shen
+
             candIdx = 0;
             bestId = -1;
-            timestamp = 1;            
+            timestamp = 1;
         }
 
         void initStats(AggregateStat* parentStat) {
@@ -183,7 +193,7 @@ class WayPartReplPolicy : public PartReplPolicy, public LegacyReplPolicy {
         }
 
         void recordCandidate(uint32_t id) {
-            assert(candIdx < ways);
+            /*assert(candIdx < ways);
             WayPartInfo* c = &array[id]; //candidate info
             WayPartInfo* best = (bestId >= 0)? &array[bestId] : nullptr;
             uint32_t way = candIdx++;
@@ -204,10 +214,34 @@ class WayPartReplPolicy : public PartReplPolicy, public LegacyReplPolicy {
                         if (c->ts < best->ts) bestId = id;
                     }
                 }
-            }
+            }*/
+            // we find the best candidate in getBestCandidate(), changed by shen
+            assert(candIdx < ways);
+            candList[candIdx++] = id;
         }
 
         uint32_t getBestCandidate() {
+            // strict way partition, by shen
+            assert(candIdx == ways);
+            uint32_t sharedPartsInWay = partitions / ways;
+            // This index is for the condition that serval partitions share one way: w0:[0,1] w1:[2,3] ...
+            // So the wayPartIndex[0]:0 wayPartIndex[1]:2 ...
+            uint32_t partIdx = sharedPartsInWay ? (incomingLinePart / sharedPartsInWay * sharedPartsInWay) : incomingLinePart;
+            
+            uint64_t tempTs = (uint64_t)-1;
+            //uint32_t bestWay = ways;
+            // normally, the i is the way's index
+            for (uint32_t i = 0; i < candIdx; ++i) {
+                WayPartInfo& e = array[candList[i]];
+                // we strictly choose the candidates from the individual partition
+                if (wayPartIndex[i] == partIdx && e.ts < tempTs) {
+                    bestId = candList[i];
+                    tempTs = e.ts;
+                    //bestWay = i;
+                }
+            }
+            //info("incoming part %d, partIdx %d, bestId %d, bestWay %d, size %ld", incomingLinePart, partIdx, bestId, bestWay, partInfo[incomingLinePart].size);
+            // end, strict way partition, by shen
             assert(bestId >= 0);
             return bestId;
         }

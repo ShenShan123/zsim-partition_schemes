@@ -124,6 +124,7 @@ LookaheadPartitioner::LookaheadPartitioner(PartReplPolicy* _repl, uint32_t _numP
         , repl(_repl)
         , numPartitions(_numPartitions)
         , buckets(_buckets) {
+        
     assert_msg(buckets > 0, "Must have non-zero buckets to avoid divide-by-zero exception.");
 
     curAllocs = gm_calloc<uint32_t>(buckets + 1);
@@ -133,7 +134,7 @@ LookaheadPartitioner::LookaheadPartitioner(PartReplPolicy* _repl, uint32_t _numP
 
 //allocs are in buckets
 void LookaheadPartitioner::partition() {
-    
+    /*
     auto& monitor = *repl->getMonitor();
 
     uint32_t bestAllocs[numPartitions];
@@ -168,7 +169,7 @@ void LookaheadPartitioner::partition() {
 
     repl->setPartitionSizes(curAllocs);
     repl->getMonitor()->reset();
-
+*/
 }
 
 
