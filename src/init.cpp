@@ -185,7 +185,7 @@ BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, 
         rp = new NRUReplPolicy(numLines, candidates);
     } else if (replType == "Rand") {
         rp = new RandReplPolicy(candidates);
-    } else if (replType == "WayPart" || replType == "Vantage" || replType == "IdealLRUPart" || replType == "FS" || replType == "PriSM" || replType == "PDPart") {
+    } else if (replType == "WayPart" || replType == "Vantage" || replType == "IdealLRUPart" || replType == "FS" || replType == "PriSM" || replType == "PDPart" || replType == "SetPart") {
         if (replType == "WayPart" && arrayType != "SetAssoc") panic("WayPart replacement requires SetAssoc array");
         if (replType == "PDPart" && arrayType != "SetAssoc") panic("PDPart replacement requires SetAssoc array");
 
@@ -255,11 +255,13 @@ BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, 
         } else if (replType == "FS") { // FS
             uint32_t assoc = (arrayType == "Z")? candidates : ways;
             prp = new FutilityScaling(mon, pm, numLines, assoc, buckets);
-        } else { // PDP
+        } else if (replType == "PDP") { // PDP
             uint32_t sd = config.get<uint32_t>(prefix + "repl.sd", 1);
             uint32_t period = config.get<uint32_t>(prefix + "repl.period", 2 * 1024 * 1024);
             prp = new PDPartReplPolicy(mon, pm, hf, numLines, ways, sd, nonInclusiveHack, period);
-        } // end, by shen
+        } else { // set partition
+            prp = new SetPartReplPolicy(mon, pm, numLines, ways, hf);
+        }// end, by shen
         rp = prp;
 
         // Partitioner
@@ -296,7 +298,8 @@ BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, 
             uint32_t window = config.get<uint32_t>(prefix + "array.window", 0);
             rds = new ReuseDistSampler(hf, fullyAssoc ? 1 : numSets, samplerSets, buckets, maxRd, window);
         }
-        array = new SetAssocArray(numLines, ways, rp, hf, rds);
+        bool sp = replType == "SetPart";
+        array = new SetAssocArray(numLines, ways, rp, hf, rds, sp); // do we configure a Set partition? 
         // end, by shen
         //array = new SetAssocArray(numLines, ways, rp, hf);
     } else if (arrayType == "Z") {

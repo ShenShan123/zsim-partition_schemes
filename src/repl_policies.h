@@ -61,6 +61,7 @@ class ReplPolicy : public GlobAlloc {
         virtual uint32_t rankCands(const MemReq* req, ZCands cands) = 0;
 
         virtual void initStats(AggregateStat* parent) {}
+        virtual uint64_t mapSet(uint32_t c, const Address, const MemReq* req) { return 0; } // for set partition, by shen
 };
 
 /* Add DECL_RANK_BINDINGS to each class that implements the new interface,

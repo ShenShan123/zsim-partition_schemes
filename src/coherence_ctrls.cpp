@@ -285,7 +285,7 @@ uint64_t MESITopCC::processAccess(Address lineAddr, uint32_t lineId, AccessType 
     // as well as L3. So the L3 cache has no sharers of L2, thus we need to handle for the PUTX/PUTS otherwise the assertion will fail. by shen
     switch (type) {
         case PUTX: // handle the dirty write back to upper level cache and change the child cache's state (lower level), by shen
-            assert_msg(/*e->isExclusive()*/ e->exclusive, "Wrong state for PUTX, address %ld, lineId %d childId %d sharers %d, srcId %d,  childState %s, isExclusive %d numSharers %d", 
+            assert_msg(/*e->isExclusive()*/ e->exclusive, "Wrong state for PUTX, address %lx, lineId %d childId %d sharers %d, srcId %d,  childState %s, isExclusive %d numSharers %d", 
                 lineAddr, lineId, childId, (int)e->sharers[childId], srcId, MESIStateName(*childState), e->exclusive, e->numSharers);
             if ((flags & MemReq::PUTX_KEEPEXCL) && e->numSharers) { // if this and the child cache do not have the copy, the e->isExclusive() could fail an assert.
                 assert(e->sharers[childId]);

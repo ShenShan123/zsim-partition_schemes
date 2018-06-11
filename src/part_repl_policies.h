@@ -61,6 +61,7 @@ class PartReplPolicy : public virtual ReplPolicy {
         const PartitionMonitor* getMonitor() const { return monitor; }
 };
 
+#define STRICT_WAY_PART 1 // control whether we do a strictly way partition, by shen
 class WayPartReplPolicy : public PartReplPolicy, public LegacyReplPolicy {
     private:
         PartInfo* partInfo;
@@ -79,9 +80,10 @@ class WayPartReplPolicy : public PartReplPolicy, public LegacyReplPolicy {
         WayPartInfo* array;
 
         uint32_t* wayPartIndex; //stores partition of each way
-        uint32_t* candList;
 
+#if !STRICT_WAY_PART
         bool testMode;
+#endif
 
         PAD();
 
@@ -96,7 +98,7 @@ class WayPartReplPolicy : public PartReplPolicy, public LegacyReplPolicy {
 
     public:
         WayPartReplPolicy(PartitionMonitor* _monitor, PartMapper* _mapper, uint64_t _lines, uint32_t _ways, bool _testMode)
-                : PartReplPolicy(_monitor, _mapper), totalSize(_lines), ways(_ways), testMode(_testMode)
+                : PartReplPolicy(_monitor, _mapper), totalSize(_lines), ways(_ways)
         {
             partitions = mapper->getNumPartitions();
             waySize = totalSize/ways; // start with evenly sized partitions
@@ -114,7 +116,6 @@ class WayPartReplPolicy : public PartReplPolicy, public LegacyReplPolicy {
 
             array = gm_calloc<WayPartInfo>(totalSize); //all have ts, p == 0...
             wayPartIndex = gm_calloc<uint32_t>(ways);
-            candList = gm_calloc<uint32_t>(ways); // strict way partition, by shen
 
             for (uint32_t w = 0; w < ways; w++) {
                 //Do initial way assignment, partitioner has no profiling info yet
@@ -122,15 +123,17 @@ class WayPartReplPolicy : public PartReplPolicy, public LegacyReplPolicy {
                 wayPartIndex[w] = p;
                 partInfo[p].targetSize += waySize;
             }
-
+#if STRICT_WAY_PART
             // strict way partition, by shen
             for (uint32_t i = 0; i < totalSize; ++i) {
                 uint32_t way = i % ways;
                 array[i].p = wayPartIndex[way];
                 partInfo[wayPartIndex[way]].size++;
             }
-
-            //partInfo[0].size = totalSize; // so partition 0 has all the lines
+#else
+            partInfo[0].size = totalSize; // so partition 0 has all the lines
+            testMode = _testMode;
+#endif
             // end, strict way partition, by shen
 
             candIdx = 0;
@@ -193,10 +196,25 @@ class WayPartReplPolicy : public PartReplPolicy, public LegacyReplPolicy {
         }
 
         void recordCandidate(uint32_t id) {
-            /*assert(candIdx < ways);
+            assert(candIdx < ways);
             WayPartInfo* c = &array[id]; //candidate info
             WayPartInfo* best = (bestId >= 0)? &array[bestId] : nullptr;
             uint32_t way = candIdx++;
+#if STRICT_WAY_PART // by shen
+            uint32_t sharedPartsInWay = partitions / ways;
+            // This index is for the condition that serval partitions share one way: w0:[0,1] w1:[2,3] ...
+            // So the wayPartIndex[0]:0 wayPartIndex[1]:2 ...
+            uint32_t partIdx = sharedPartsInWay ? (incomingLinePart / sharedPartsInWay * sharedPartsInWay) : incomingLinePart;
+            // we find the candidate from this shared partition
+            if (wayPartIndex[way] == partIdx) {
+                if (best == nullptr)
+                    bestId = id;
+                else if (c->ts < best->ts) 
+                    bestId = id;
+            }
+            //info("incoming p %d, partIdx %d, cand part %d, wayPartIndex[%d] %d, size %ld", 
+                //incomingLinePart, partIdx, c->p, way, wayPartIndex[way], partInfo[incomingLinePart].size);
+#else // end, by shen
             //In test mode, this works as LRU
             if (testMode || wayPartIndex[way] == incomingLinePart) { //this is a way we can fill
                 if (best == nullptr) {
@@ -214,34 +232,13 @@ class WayPartReplPolicy : public PartReplPolicy, public LegacyReplPolicy {
                         if (c->ts < best->ts) bestId = id;
                     }
                 }
-            }*/
-            // we find the best candidate in getBestCandidate(), changed by shen
-            assert(candIdx < ways);
-            candList[candIdx++] = id;
+            }
+#endif
         }
 
         uint32_t getBestCandidate() {
             // strict way partition, by shen
             assert(candIdx == ways);
-            uint32_t sharedPartsInWay = partitions / ways;
-            // This index is for the condition that serval partitions share one way: w0:[0,1] w1:[2,3] ...
-            // So the wayPartIndex[0]:0 wayPartIndex[1]:2 ...
-            uint32_t partIdx = sharedPartsInWay ? (incomingLinePart / sharedPartsInWay * sharedPartsInWay) : incomingLinePart;
-            
-            uint64_t tempTs = (uint64_t)-1;
-            //uint32_t bestWay = ways;
-            // normally, the i is the way's index
-            for (uint32_t i = 0; i < candIdx; ++i) {
-                WayPartInfo& e = array[candList[i]];
-                // we strictly choose the candidates from the individual partition
-                if (wayPartIndex[i] == partIdx && e.ts < tempTs) {
-                    bestId = candList[i];
-                    tempTs = e.ts;
-                    //bestWay = i;
-                }
-            }
-            //info("incoming part %d, partIdx %d, bestId %d, bestWay %d, size %ld", incomingLinePart, partIdx, bestId, bestWay, partInfo[incomingLinePart].size);
-            // end, strict way partition, by shen
             assert(bestId >= 0);
             return bestId;
         }
@@ -267,8 +264,175 @@ class WayPartReplPolicy : public PartReplPolicy, public LegacyReplPolicy {
 #if UMON_INFO
             for (uint32_t w = 0; w < ways; w++) info("wayPartIndex[%d] = %d", w, wayPartIndex[w]);
 #endif
-            //assert(curWay == ways);
+            assert(curWay == ways);
         }
+};
+
+class SetPartReplPolicy : public PartReplPolicy, public LegacyReplPolicy {
+    private:
+        PartInfo* partInfo;
+        uint32_t partitions;
+
+        uint32_t totalSize;
+        uint32_t sets;
+        uint32_t ways;
+
+        struct SetPartInfo {
+            Address addr; //FIXME: This is redundant due to the replacement policy interface
+            uint64_t ts; //timestamp, >0 if in the cache, == 0 if line is empty
+            uint32_t p;
+        };
+
+        SetPartInfo* array;
+
+        uint32_t* setPartIndex; //stores partition of each way
+
+        PAD();
+
+        //Replacement process state (RW)
+        int32_t bestId;
+        uint32_t candIdx;
+        uint32_t incomingLinePart; //to what partition does the incoming line belong?
+        Address incomingLineAddr;
+        uint64_t currSet; // the set that we currently operate
+
+        //Globally incremented, but bears little significance per se
+        uint64_t timestamp;
+        HashFamily* hf;
+
+    public:
+        SetPartReplPolicy(PartitionMonitor* _monitor, PartMapper* _mapper, uint64_t _lines, uint32_t _ways, HashFamily* _hf)
+                : PartReplPolicy(_monitor, _mapper), totalSize(_lines), ways(_ways), hf(_hf)
+        {
+            partitions = mapper->getNumPartitions();
+            sets = totalSize/ways;
+            currSet = sets;
+            assert(partitions < sets); // make sure that the # of partitions is larger than # of sets
+
+            partInfo = gm_calloc<PartInfo>(partitions);
+            for (uint32_t i = 0; i < partitions; i++) {
+                partInfo[i].targetSize = 0;
+                //Need placement new, these object have vptr
+                new (&partInfo[i].profHits) Counter;
+                new (&partInfo[i].profMisses) Counter;
+                new (&partInfo[i].profSelfEvictions) Counter;
+                new (&partInfo[i].profExtEvictions) Counter;
+            }
+
+            array = gm_calloc<SetPartInfo>(totalSize); //all have ts, p == 0...
+            setPartIndex = gm_calloc<uint32_t>(sets);
+            uint32_t p = 0;
+            for (uint32_t s = 0; s < sets; s++) {
+                setPartIndex[s] = p++; // we assign the sets to each partition iteratively
+                p = (p == partitions) ? 0 : p;
+                //info("setPartIndex[%d] %d", s, setPartIndex[s]);
+            }
+
+            // strict set partition, by shen
+            for (uint32_t i = 0; i < totalSize; ++i) {
+                uint32_t set = i / ways;
+                array[i].p = setPartIndex[set];
+                partInfo[setPartIndex[set]].size++;
+            }
+            assert(partInfo[0].size == totalSize / partitions);
+
+            candIdx = 0;
+            bestId = -1;
+            timestamp = 1;
+        }
+
+        inline uint64_t mapSet(uint32_t c, const Address lineAddr, const MemReq* req) {
+            uint64_t set = hf->hash(c, lineAddr) & (sets - 1);
+            set = set / partitions * partitions + mapper->getPartition(*req);
+            currSet = set;
+            return set;
+        }
+
+        void initStats(AggregateStat* parentStat) {
+            //AggregateStat* partsStat = new AggregateStat(true /*this is a regular aggregate, ONLY PARTITION STATS GO IN HERE*/);
+            AggregateStat* partsStat = new AggregateStat(false); //don't make it a regular aggregate... it gets compacted in periodic stats and becomes useless!
+            partsStat->init("part", "Partition stats");
+            for (uint32_t p = 0; p < partitions; p++) {
+                std::stringstream pss;
+                pss << "part-" << p;
+                AggregateStat* partStat = new AggregateStat();
+                partStat->init(gm_strdup(pss.str().c_str()), "Partition stats");
+                ProxyStat* pStat;
+                pStat = new ProxyStat(); pStat->init("sz", "Actual size", &partInfo[p].size); partStat->append(pStat);
+                pStat = new ProxyStat(); pStat->init("tgtSz", "Target size", &partInfo[p].targetSize); partStat->append(pStat);
+                partInfo[p].profHits.init("hits", "Hits"); partStat->append(&partInfo[p].profHits);
+                partInfo[p].profMisses.init("misses", "Misses"); partStat->append(&partInfo[p].profMisses);
+                partInfo[p].profSelfEvictions.init("selfEvs", "Evictions caused by us"); partStat->append(&partInfo[p].profSelfEvictions);
+                partInfo[p].profExtEvictions.init("extEvs", "Evictions caused by others"); partStat->append(&partInfo[p].profExtEvictions);
+
+                partsStat->append(partStat);
+            }
+            parentStat->append(partsStat);
+        }
+
+        void update(uint32_t id, const MemReq* req) {
+            SetPartInfo* e = &array[id];
+            if (e->ts > 0) { //this is a hit update
+                partInfo[e->p].profHits.inc();
+            } else { //post-miss update, old line has been removed, this is empty
+                uint32_t oldPart = e->p;
+                uint32_t newPart = incomingLinePart;
+                if (oldPart != newPart) {
+                    partInfo[oldPart].size--;
+                    partInfo[oldPart].profExtEvictions.inc();
+                    partInfo[newPart].size++;
+                } else {
+                    partInfo[oldPart].profSelfEvictions.inc();
+                }
+                partInfo[newPart].profMisses.inc();
+                e->p = newPart;
+            }
+            e->ts = timestamp++;
+
+            //Update partitioner...
+            monitor->access(e->p, e->addr);
+        }
+
+        void hitUpdate(uint32_t id, const MemReq* req) { update(id, req); } //sxj
+
+        void startReplacement(const MemReq* req) {
+            assert(candIdx == 0);
+            assert(bestId == -1);
+            incomingLinePart = mapper->getPartition(*req);
+            incomingLineAddr = req->lineAddr;
+            //info("set %ld, currSet %ld, setPartIndex %d, incomingLinePart %d, size %ld", mapSet(0, incomingLineAddr, req), currSet, setPartIndex[currSet], (int)incomingLinePart, partInfo[incomingLinePart].size);
+            assert(setPartIndex[currSet] == incomingLinePart);
+        }
+
+        void recordCandidate(uint32_t id) {
+            assert(candIdx++ < ways);
+            SetPartInfo& e = array[id];
+            assert(e.p == setPartIndex[currSet]);
+
+            if (bestId == -1)
+                bestId = id;
+            else if (e.ts < array[bestId].ts) {
+                bestId = id;
+            }
+        }
+
+        uint32_t getBestCandidate() {
+            // strict way partition, by shen
+            assert(candIdx == ways);
+            assert(bestId >= 0);
+            return bestId;
+        }
+
+        void replaced(uint32_t id) {
+            candIdx = 0;
+            bestId = -1;
+            array[id].ts = 0;
+            array[id].addr = incomingLineAddr;
+            //info("0x%lx", incomingLineAddr);
+        }
+
+    private:
+        void setPartitionSizes(const uint32_t* waysPart) {}
 };
 
 #define VANTAGE_8BIT_BTS 1 //1 for 8-bit coarse-grain timestamps, 0 for 64-bit coarse-grain (no wrap-arounds)

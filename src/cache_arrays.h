@@ -56,6 +56,7 @@ class  CacheArray : public GlobAlloc {
 class ReplPolicy;
 class HashFamily;
 
+#define AGE_PROF 0 // by shen
 /* Set-associative cache array */
 class SetAssocArray : public CacheArray {
     protected:
@@ -68,15 +69,18 @@ class SetAssocArray : public CacheArray {
         uint32_t setMask;
         // added by shen
         ReuseDistSampler* rds;
+#if AGE_PROF
         VectorCounter rHitDistr;
         VectorCounter hitDistr;
         VectorCounter ageDistr;
         uint32_t* arrayAges;
         uint32_t maxDim;
+#endif
+        bool setPartition;
         // added end
 
     public:
-        SetAssocArray(uint32_t _numLines, uint32_t _assoc, ReplPolicy* _rp, HashFamily* _hf, ReuseDistSampler* _sampler = nullptr); // changed by shen
+        SetAssocArray(uint32_t _numLines, uint32_t _assoc, ReplPolicy* _rp, HashFamily* _hf, ReuseDistSampler* _sampler = nullptr, bool _sp = false); // changed by shen
 
         int32_t lookup(const Address lineAddr, const MemReq* req, bool updateReplacement);
         uint32_t preinsert(const Address lineAddr, const MemReq* req, Address* wbLineAddr);

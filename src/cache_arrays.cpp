@@ -29,35 +29,42 @@
 
 /* Set-associative array implementation */
 
-SetAssocArray::SetAssocArray(uint32_t _numLines, uint32_t _assoc, ReplPolicy* _rp, HashFamily* _hf, ReuseDistSampler* _sampler) 
-: rp(_rp), hf(_hf), numLines(_numLines), assoc(_assoc), rds(_sampler)
+SetAssocArray::SetAssocArray(uint32_t _numLines, uint32_t _assoc, ReplPolicy* _rp, HashFamily* _hf, ReuseDistSampler* _sampler, bool _sp) 
+: rp(_rp), hf(_hf), numLines(_numLines), assoc(_assoc), rds(_sampler), setPartition(_sp) // for set partition scheme, by shen
 {
     array = gm_calloc<Address>(numLines);
     numSets = numLines/assoc;
     setMask = numSets - 1;
     // record the lines' ages,  by shen
+#if AGE_PROF
     arrayAges = gm_calloc<uint32_t>(numLines); 
     for (uint32_t i = 0; i < numLines; ++i) arrayAges[i] = 512; // should be larger than maxDim!
+#endif
     // end, by shen
     assert_msg(isPow2(numSets), "must have a power of 2 # sets, but you specified %d", numSets);
 }
 
 int32_t SetAssocArray::lookup(const Address lineAddr, const MemReq* req, bool updateReplacement) {
+#if AGE_PROF
     uint32_t rd = 0;
     if (rds != nullptr) rd = rds->access(lineAddr); // monitor RD distribution, by shen
-    
-    uint32_t set = hf->hash(0, lineAddr) & setMask;
+#endif
+
+    uint32_t set = setPartition ? rp->mapSet(0, lineAddr, req) : hf->hash(0, lineAddr) & setMask; // mat the set for each partition, by shen
     uint32_t first = set * assoc;
 
     // every lines in this set increment their ages, by shen
+#if AGE_PROF
     for (uint32_t id = first; id < first + assoc; id++) {
         ++arrayAges[id];
     }
+#endif
     // end, by shen
 
     for (uint32_t id = first; id < first + assoc; id++) {
         if (array[id] == lineAddr) {
             // hits distibution across all RDs, by shen
+#if AGE_PROF
             if (rds != nullptr) {
                 rHitDistr.inc(rd); // hit distribution on RDs
                 uint32_t age = arrayAges[id] > maxDim ? maxDim - 1 : arrayAges[id] - 1;
@@ -65,18 +72,23 @@ int32_t SetAssocArray::lookup(const Address lineAddr, const MemReq* req, bool up
                 ageDistr.inc(age);
             }
             arrayAges[id] = 0;
-
+#endif
             if (updateReplacement) rp->hitUpdate(id, req); // this function only works differently from update() in RRIP & PDP repl policy, sxj
             //if (updateReplacement) rp->update(id, req);
             return id;
         }
     }
+
+#if AGE_PROF
     rd++;
+#endif
+
     return -1;
 }
 
 uint32_t SetAssocArray::preinsert(const Address lineAddr, const MemReq* req, Address* wbLineAddr) { //TODO: Give out valid bit of wb cand?
-    uint32_t set = hf->hash(0, lineAddr) & setMask;
+    uint32_t set = setPartition ? rp->mapSet(0, lineAddr, req) : hf->hash(0, lineAddr) & setMask; // mat the set for each partition, by shen
+    //uint32_t set = hf->hash(0, lineAddr) & setMask;
     uint32_t first = set*assoc;
 
     uint32_t candidate = rp->rankCands(req, SetAssocCands(first, first+assoc));
@@ -89,13 +101,14 @@ uint32_t SetAssocArray::preinsert(const Address lineAddr, const MemReq* req, Add
 void SetAssocArray::postinsert(const Address lineAddr, const MemReq* req, uint32_t candidate) {
     rp->replaced(candidate);
     array[candidate] = lineAddr;
-    
+#if AGE_PROF 
     if (rds != nullptr)  {
         uint32_t age = arrayAges[candidate] > maxDim ? maxDim - 1 : arrayAges[candidate] - 1;
         ageDistr.inc(age); // if the line is evicted, its age is record to ageDistr, by shen
     }
     
     arrayAges[candidate] = 0; // a new age, by shen
+#endif
     rp->update(candidate, req);
 }
 
@@ -104,6 +117,7 @@ void SetAssocArray::initStats(AggregateStat* parentStat) {
     arrayStats->init("arrayStats", "set associative array stats");
     // init the hit distribution with RDs, by shen
     // init the rdd stats, by shen
+#if AGE_PROF
     if (rds != nullptr) {
         assert(rds->getRdvSize());
         ageDistr.init("ageDistr", "age distribution", rds->getRdvSize()); arrayStats->append(&ageDistr);
@@ -112,7 +126,7 @@ void SetAssocArray::initStats(AggregateStat* parentStat) {
         maxDim = hitDistr.size();
         rds->initStats(parentStat);
     }
-
+#endif
     parentStat->append(arrayStats);
 }
 

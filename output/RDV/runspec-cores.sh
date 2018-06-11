@@ -31,6 +31,9 @@ do
 	elif [[ $benchname =~ 505.mcf_r ]]
 	then
 		command="command = \"\/mnt\/hgfs\/ShareShen\/zsim-master\/output\/RDV\/${benchname}\/mcf_r_base.mytest-64 \/mnt\/hgfs\/ShareShen\/zsim-master\/output\/RDV\/${benchname}\/inp.in\""
+	elif [[ $benchname =~ 507.cactuBSSN_r ]]
+	then
+		command="command = \"\/mnt\/hgfs\/ShareShen\/zsim-master\/output\/RDV\/${benchname}\/cactuBSSN_r_base.mytest-64 \/mnt\/hgfs\/ShareShen\/zsim-master\/output\/RDV\/${benchname}\/spec_ref.par\""
 	elif [[ $benchname =~ 520.omnetpp_r ]]
 	then
 		command="command = \"\/mnt\/hgfs\/ShareShen\/zsim-master\/output\/RDV\/${benchname}\/omnetpp_r_base.mytest-64 \/mnt\/hgfs\/ShareShen\/zsim-master\/output\/RDV\/${benchname}\/omnetpp.ini\""
