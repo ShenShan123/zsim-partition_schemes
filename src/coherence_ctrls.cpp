@@ -285,7 +285,7 @@ uint64_t MESITopCC::processAccess(Address lineAddr, uint32_t lineId, AccessType 
     // as well as L3. So the L3 cache has no sharers of L2, thus we need to handle for the PUTX/PUTS otherwise the assertion will fail. by shen
     switch (type) {
         case PUTX: // handle the dirty write back to upper level cache and change the child cache's state (lower level), by shen
-            assert_msg(e->isExclusive() /*e->exclusive*/, "Wrong state for PUTX, address %lx, lineId %d childId %d sharers %d, srcId %d,  childState %s, isExclusive %d numSharers %d", 
+            assert_msg(/*e->isExclusive()*/ e->exclusive, "Wrong state for PUTX, address %lx, lineId %d childId %d sharers %d, srcId %d,  childState %s, isExclusive %d numSharers %d", 
                 lineAddr, lineId, childId, (int)e->sharers[childId], srcId, MESIStateName(*childState), e->exclusive, e->numSharers);
             if (flags & MemReq::PUTX_KEEPEXCL) { // if this and the child cache do not have the copy, the e->isExclusive() could fail an assert.
                 assert(e->sharers[childId]);
@@ -298,17 +298,17 @@ uint64_t MESITopCC::processAccess(Address lineAddr, uint32_t lineId, AccessType 
             }
             //note NO break in general
         case PUTS:// a clean write back from child cache indicate the line in lower cache has been evicted in exclusive cache. by shen
-            //if (e->numSharers && !e->sharers[childId]) // if this line in this level does have any sharers, but not the current childId, just invalide the childState. by shen
-                assert_msg(e->sharers[childId], "Wrong state for PUTS, address %ld, lineId %d childId %d sharers %d, srcId %d,  childState %s, isExclusive %d numSharers %d %d", 
+            if (e->numSharers != 0) { // if this line in this level does have any sharers, but not the current childId, just invalide the childState. by shen
+                assert_msg(e->sharers[childId], "Wrong state for PUTS, address %lx, lineId %d childId %d sharers %d, srcId %d,  childState %s, isExclusive %d numSharers %d %d", 
                     lineAddr, lineId, childId, (int)e->sharers[childId], srcId, MESIStateName(*childState), e->exclusive, e->numSharers, (int)e->sharers.count()); // commented by shen
                 //e->sharers[childId] = false;
             //else if (e->numSharers && e->sharers[childId]) { // if this line has sharer and the sharer is this child cache, take it from the sharer list, by shen
                 e->sharers[childId] = false;
                 e->numSharers--;
-            //}
+            }
             // if no sharers, it indicates the L2 is also nonInclusive, so just change state of the cacheline in L1, by shen
             *childState = I;
-            if (e->numSharers == 0) e->sharers.reset(); // added by shen.
+            //if (e->numSharers == 0) e->sharers.reset(); // added by shen.
             break;
         case GETS: // fetch a clean line by the child cache
             if (e->isEmpty() && haveExclusive && !(flags & MemReq::NOEXCL)) {

@@ -358,7 +358,7 @@ BaseCache* BuildCacheBank(Config& config, const string& prefix, g_string& name, 
         cache = new FilterCache(numSets, numLines, cc, array, rp, accLat, invLat, name);
     }
 
-#if 1
+#if 0
     info("bank, %d bytes, %d lines, %d ways (%d candidates if array is Z), %s array, %s hash, %s replacement, %d no-inclusion, accLat %d, invLat %d name %s",
             bankSize, numLines, ways, candidates, arrayType.c_str(), hashType.c_str(), replType.c_str(), nonInclusiveHack, accLat, invLat, name.c_str());
 #endif

@@ -76,6 +76,7 @@ class SetAssocArray : public CacheArray {
         uint32_t* arrayAges;
         uint32_t maxDim;
 #endif
+        VectorCounter sameBitsDistr;
         bool setPartition;
         // added end
 

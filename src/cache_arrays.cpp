@@ -26,6 +26,7 @@
 #include "cache_arrays.h"
 #include "hash.h"
 #include "repl_policies.h"
+#include <nmmintrin.h>
 
 /* Set-associative array implementation */
 
@@ -61,7 +62,14 @@ int32_t SetAssocArray::lookup(const Address lineAddr, const MemReq* req, bool up
 #endif
     // end, by shen
 
+    // statistic the different # of bits of tags, by shen
+    bool hit =  false;
+    uint32_t hitIdx = numLines;
+
     for (uint32_t id = first; id < first + assoc; id++) {
+        int64_t numOne = _mm_popcnt_u64(~(array[id] ^ lineAddr));
+        sameBitsDistr.inc(numOne);
+
         if (array[id] == lineAddr) {
             // hits distibution across all RDs, by shen
 #if AGE_PROF
@@ -73,11 +81,12 @@ int32_t SetAssocArray::lookup(const Address lineAddr, const MemReq* req, bool up
             }
             arrayAges[id] = 0;
 #endif
+            hit = true;
+            hitIdx = id;
             if (updateReplacement) rp->hitUpdate(id, req); // this function only works differently from update() in RRIP & PDP repl policy, sxj
-            //if (updateReplacement) rp->update(id, req);
-            return id;
         }
     }
+    if (hit) return hitIdx;
 
 #if AGE_PROF
     rd++;
@@ -127,6 +136,7 @@ void SetAssocArray::initStats(AggregateStat* parentStat) {
         rds->initStats(parentStat);
     }
 #endif
+    sameBitsDistr.init("sameBitsDistr", "number of same bits in tag comparison", 65); arrayStats->append(&sameBitsDistr);
     parentStat->append(arrayStats);
 }
 
